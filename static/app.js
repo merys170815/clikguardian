@@ -1,89 +1,142 @@
 // static/app.js
-const tbody = document.getElementById("tbody");
-const onlySusp = document.getElementById("onlySuspicious");
-const search = document.getElementById("search");
-const btnRefresh = document.getElementById("refresh");
-const kpis = document.getElementById("kpis");
+const tbody = document.getElementById('tbody');
+const refreshBtn = document.getElementById('refresh');
+const onlySuspicious = document.getElementById('onlySuspicious');
+const searchInput = document.getElementById('search');
+const kpiSummary = document.getElementById('kpiSummary');
 
-function badge(score) {
-  if (score >= 80) return '<span class="badge alto">Alto</span>';
-  if (score >= 40) return '<span class="badge medio">Medio</span>';
-  return '<span class="badge bajo">Bajo</span>';
+let events_cache = [];
+
+// Modal mapa y Leaflet
+const modal = document.getElementById('mapModal');
+const closeMapBtn = document.getElementById('closeMap');
+let map, marker, circle;
+
+function openMap(lat, lon, title = '', radiusMeters = 300) {
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    if(!map) {
+      map = L.map('map', {zoomControl:false}).setView([lat || 0, lon || 0], lat?15:2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: ''
+      }).addTo(map);
+    } else {
+      map.invalidateSize();
+      map.setView([lat || 0, lon || 0], lat?15:2);
+    }
+
+    if(marker) map.removeLayer(marker);
+    if(circle) map.removeLayer(circle);
+
+    if(lat && lon) {
+      marker = L.marker([lat, lon]).addTo(map).bindPopup(title);
+      circle = L.circle([lat, lon], { radius: radiusMeters, color: '#2bffbc', fillColor: '#2bffbc', fillOpacity: 0.15 }).addTo(map);
+      map.fitBounds(circle.getBounds(), { padding: [20,20] });
+    }
+  }, 50);
 }
 
-function row(ev) {
-  const geo = ev.geo || {};
-  const risk = ev.risk || { score: 0, reasons: [] };
-  const city = geo.city || "-";
-  const region = geo.region || "-";
-  const isp = geo.org || "-";
-  const ua = ev.ua || "-";
-  const ref = ev.ref || "-";
-  const dwell = ev.dwell_ms != null ? `${Math.round(ev.dwell_ms)} ms` : "-";
-  const razon = (risk.reasons || []).join(" · ");
-
-  return `
-  <tr>
-    <td>${new Date(ev.ts).toLocaleString()}</td>
-    <td class="mono">${ev.ip}</td>
-    <td>${city} / ${region}<br><span class="mono" style="opacity:.7">${isp}</span></td>
-    <td title="${ua}">${ua.substring(0, 48)}${ua.length>48?"…":""}</td>
-    <td>${ref}</td>
-    <td>${dwell}</td>
-    <td>${badge(risk.score)}<br><small>${razon || "-"}</small></td>
-    <td>
-      <button class="danger" onclick="blockIP('${ev.ip}')">Bloquear IP</button>
-    </td>
-  </tr>`;
-}
-
-async function fetchEvents() {
-  const r = await fetch("/api/events?limit=300");
-  const j = await r.json();
-  let list = j.events || [];
-
-  const q = (search.value || "").toLowerCase().trim();
-  if (q) {
-    list = list.filter(e => {
-      const geo = e.geo || {};
-      const hay = [
-        e.ip, e.ua, e.ref, (geo.city||""), (geo.region||""), (geo.org||"")
-      ].join(" ").toLowerCase();
-      return hay.includes(q);
-    });
-  }
-  if (onlySusp.checked) {
-    list = list.filter(e => (e.risk && e.risk.score >= 80));
-  }
-
-  tbody.innerHTML = list.map(row).join("");
-
-  // KPIs
-  const total = j.events?.length || 0;
-  const suspicious = j.events?.filter(e => e.risk && e.risk.score >= 80).length || 0;
-  const fast = j.events?.filter(e => (e.dwell_ms || 0) < 800).length || 0;
-  kpis.innerHTML = `
-    <div class="badge">Total: ${total}</div>
-    <div class="badge alto">Sospechosos: ${suspicious}</div>
-    <div class="badge medio">Dwell < 800ms: ${fast}</div>
-  `;
-}
-
-async function blockIP(ip) {
-  await fetch("/api/blocklist", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ ip })
-  });
-  fetchEvents();
-}
-
-btnRefresh?.addEventListener("click", fetchEvents);
-onlySusp?.addEventListener("change", fetchEvents);
-search?.addEventListener("input", () => {
-  // filtra en vivo sin pedir al server
-  fetchEvents();
+closeMapBtn.addEventListener('click', () => {
+  modal.style.display = 'none';
 });
 
-fetchEvents();
-setInterval(fetchEvents, 20000);
+// zoom controls
+document.getElementById('zoomIn').addEventListener('click', ()=> map && map.zoomIn());
+document.getElementById('zoomOut').addEventListener('click', ()=> map && map.zoomOut());
+
+async function loadEvents() {
+  try {
+    const res = await fetch('/api/events?limit=200');
+    const j = await res.json();
+    events_cache = j.events || [];
+    renderTable();
+    renderKPIs();
+  } catch(err) {
+    console.error('Error cargando eventos', err);
+  }
+}
+
+function renderKPIs(){
+  const total = events_cache.length;
+  const suspicious = events_cache.filter(e => e.risk && e.risk.suspicious).length;
+  const dwellSmall = events_cache.filter(e => e.dwell_ms && e.dwell_ms < 800).length;
+  kpiSummary.innerText = `Total: ${total} · Sospechosos: ${suspicious} · Dwell <800ms: ${dwellSmall}`;
+}
+
+function renderTable(){
+  const q = searchInput.value.trim().toLowerCase();
+  const onlyS = onlySuspicious.checked;
+  tbody.innerHTML = '';
+
+  events_cache.forEach(ev => {
+    const geo = ev.geo || {};
+    const city = geo.city || '-';
+    const region = geo.region || '-';
+    const isp = (geo.isp || geo.org || geo.orgname || '-');
+    const lat = geo.lat || geo.latitude || 0;
+    const lon = geo.lon || geo.longitude || 0;
+
+    const rowText = `${ev.ip} ${city} ${isp} ${ev.ua || ''}`.toLowerCase();
+    if(q && rowText.indexOf(q) === -1) return;
+    if(onlyS && !(ev.risk && ev.risk.suspicious)) return;
+
+    const tr = document.createElement('tr');
+
+    const tsTd = document.createElement('td');
+    tsTd.textContent = ev.ts ? new Date(ev.ts).toLocaleString() : '-';
+    tr.appendChild(tsTd);
+
+    const ipTd = document.createElement('td');
+    ipTd.innerHTML = `<span class="mono">${ev.ip || '-'}</span>`;
+    tr.appendChild(ipTd);
+
+    const cityTd = document.createElement('td');
+    cityTd.innerHTML = `<strong>${city}</strong><div style="color:#9aa5b1;font-size:12px">${region} · ${isp}</div>`;
+    tr.appendChild(cityTd);
+
+    const uaTd = document.createElement('td'); uaTd.textContent = ev.ua || '-'; tr.appendChild(uaTd);
+    const refTd = document.createElement('td'); refTd.textContent = ev.ref || ev.url || '-'; tr.appendChild(refTd);
+    const dwellTd = document.createElement('td'); dwellTd.textContent = ev.dwell_ms ? `${ev.dwell_ms} ms` : '-'; tr.appendChild(dwellTd);
+
+    const riskTd = document.createElement('td');
+    const score = ev.risk && ev.risk.score ? ev.risk.score : 0;
+    let badge = 'bajo';
+    if(score >= 80) badge = 'alto'; else if(score >= 40) badge = 'medio';
+    riskTd.innerHTML = `<span class="badge ${badge}">${score} (${ev.risk && ev.risk.reasons ? ev.risk.reasons.join(', ') : ''})</span>`;
+    tr.appendChild(riskTd);
+
+    const actionTd = document.createElement('td');
+    // Botón mapa
+    const mapBtn = document.createElement('button');
+    mapBtn.className = 'map-btn';
+    mapBtn.textContent = 'Mapa';
+    mapBtn.onclick = () => {
+      openMap(Number(lat), Number(lon), `${ev.ip} · ${city}`, 300); // radio 300 m por defecto
+    };
+    actionTd.appendChild(mapBtn);
+
+    // Botón bloquear IP (POST /api/blocklist)
+    const blockBtn = document.createElement('button');
+    blockBtn.textContent = 'Bloquear IP';
+    blockBtn.style.marginLeft = '8px';
+    blockBtn.className = 'danger';
+    blockBtn.onclick = async () => {
+      try {
+        await fetch('/api/blocklist', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ip: ev.ip })});
+        loadEvents();
+        alert('IP bloqueada en blocklist local.');
+      } catch(e){ console.error(e); alert('Error bloqueando'); }
+    };
+    actionTd.appendChild(blockBtn);
+
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  });
+}
+
+refreshBtn.addEventListener('click', loadEvents);
+searchInput.addEventListener('input', renderTable);
+onlySuspicious.addEventListener('change', renderTable);
+
+// carga inicial
+loadEvents();

@@ -5,161 +5,125 @@
   <title>ClickGuardian — Panel Anti Clicks Inválidos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+  <!-- Leaflet (mapa) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+    :root{ --bg:#0d1117; --panel:#0f1720; --muted:#9aa5b1; --accent:#0ea5a4; }
     body {
       margin: 0;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
-      background: #0d1117;
+      background: var(--bg);
       color: #e6edf3;
-      overflow-x: hidden;
     }
-
-    /* HEADER FIJO */
     header {
-      padding: 18px 22px;
+      padding: 12px 22px;
       border-bottom: 1px solid #1e2637;
-      background: #111827;
+      background: #0b1220;
       position: sticky;
       top: 0;
-      z-index: 20; /* Más alto para que nunca lo tape la tabla */
+      z-index: 50;
     }
-
-    h1 {
-      margin: 0;
-      font-size: 22px;
-      font-weight: 600;
-    }
-
-    .sub {
-      font-size: 12px;
-      opacity: .7;
-    }
-
+    h1 { margin: 0; font-size: 20px; font-weight: 600; }
+    .sub { font-size: 12px; opacity: .75; color: var(--muted); }
     .wrap {
       max-width: 1200px;
-      margin: 85px auto 20px; /* deja un espacio para que la tabla nunca se meta debajo del header */
-      padding: 0 20px;
+      margin: 18px auto;
+      padding: 0 18px 40px;
     }
 
+    /* CONTROLES: fijo por debajo del header */
     .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-      align-items: center;
-    }
-
-    input[type="text"] {
-      padding: 8px 10px;
-      border: 1px solid #333;
-      background: #0f1420;
-      color: #e6edf3;
-      border-radius: 6px;
-    }
-
-    button {
-      padding: 8px 12px;
-      border: 1px solid #444;
-      background: #1a2030;
-      color: #e6edf3;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-
-    button:hover { background: #232a3d; }
-
-    button.danger {
-      border-color: #5f1b20;
-      background: #2a0f12;
-    }
-
-    button.danger:hover {
-      background: #40161e;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    th, td {
-      text-align: left;
-      padding: 10px;
-      border-bottom: 1px solid #1e2637;
-      vertical-align: top;
-      font-size: 14px;
-    }
-
-    th {
-      background: #111827;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      padding:10px 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
       position: sticky;
-      top: 70px;  /* ALTURA EXACTA del header */
-      z-index: 10;
+      top: 56px; /* altura del header */
+      z-index: 40;
+      border-bottom:1px solid #141a24;
     }
 
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    input[type="text"]{
+      padding:8px 10px;
+      border-radius:6px;
+      border:1px solid #23303b;
+      background:#081018;
+      color: #e6edf3;
+      min-width:240px;
+    }
+    button{ padding:8px 12px; border-radius:6px; border:1px solid #26313b; background:#0f1720; color:#e6edf3; cursor:pointer; }
+    button.danger{ background:#2a0f12; border-color:#5f1b20; }
+
+    /* Contenedor tabla con scroll */
+    .table-wrap {
+      overflow:auto;
+      max-height: calc(72vh - 28px);
+      border-radius:10px;
+      border: 1px solid #1e2637;
+      margin-top: 12px;
     }
 
-    .badge {
-      padding: 3px 9px;
-      border-radius: 999px;
-      font-size: 12px;
-      border: 1px solid #334;
-      display: inline-block;
-      margin-bottom: 4px;
+    table { width:100%; border-collapse:collapse; min-width: 980px; }
+    th, td { text-align:left; padding:12px; border-bottom:1px solid #111827; vertical-align:top; font-size:14px; color:#dfe7ee;}
+    thead th {
+      background: linear-gradient(180deg,#0b1320,#07111a);
+      position: sticky;
+      top: calc(56px + 48px); /* header + controls (ajusta si cambias su altura) */
+      z-index: 30;
     }
 
-    .badge.alto {
-      background: #2a0f12;
-      border-color: #5f1b20;
-      color: #ffb3b8;
-    }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cbe7ff;}
+    .badge{ padding:4px 8px; border-radius:999px; font-size:12px; }
+    .badge.alto{ background:#3a0f12; color:#ffb3b8; }
+    .badge.medio{ background:#3a341b; color:#ffe2a8; }
+    .badge.bajo{ background:#08321f; color:#b7ffd9; }
 
-    .badge.medio {
-      background: #2a240f;
-      border-color: #5f4d1b;
-      color: #ffe2a8;
-    }
+    /* Botón pequeño para abrir mapa */
+    .map-btn { padding:6px 8px; font-size:13px; border-radius:6px; background:#0b5; color:#041; border:none; cursor:pointer; }
 
-    .badge.bajo {
-      background: #0f2a19;
-      border-color: #1b5f3b;
-      color: #b7ffd9;
+    /* Modal mapa */
+    .modal {
+      display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center;
+      background: rgba(0,0,0,0.6);
     }
+    .modal .box {
+      width: 90%;
+      max-width:900px;
+      height: 70vh;
+      background: #071018;
+      border-radius:8px;
+      overflow:hidden;
+      border:1px solid #122028;
+      display:flex; flex-direction:column;
+    }
+    .modal .box .hdr { padding:10px 12px; display:flex; justify-content:space-between; align-items:center; background:#07131a; }
+    #map { flex:1; }
+    .close { background:#1e293b; color:#fff; padding:6px 8px; border-radius:6px; border:none; cursor:pointer; }
 
-    #kpis {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 15px;
+    @media (max-width:900px){
+      thead th{ top:110px; }
     }
   </style>
 </head>
-
 <body>
-
   <header>
     <h1>ClickGuardian</h1>
     <div class="sub">Sistema Profesional Anti Clicks Inválidos</div>
   </header>
 
   <div class="wrap">
-
-    <!-- CONTROLES -->
     <div class="controls">
       <input id="search" type="text" placeholder="Buscar por IP, UA, ciudad, ISP…" />
-      <label style="display:flex;align-items:center;gap:6px;">
+      <label style="display:flex;align-items:center;gap:8px;color:var(--muted);">
         <input id="onlySuspicious" type="checkbox"/> Solo sospechosos
       </label>
       <button id="refresh">Actualizar</button>
+      <div style="margin-left:auto;color:var(--muted);" id="kpiSummary"></div>
     </div>
 
-    <!-- KPIs -->
-    <div id="kpis"></div>
-
-    <!-- TABLA -->
-    <div style="overflow:auto; max-height:72vh; border:1px solid #1e2637; border-radius:10px;">
+    <div class="table-wrap">
       <table>
         <thead>
           <tr>
@@ -173,15 +137,27 @@
             <th>Acción</th>
           </tr>
         </thead>
-
         <tbody id="tbody"></tbody>
       </table>
     </div>
-
   </div>
 
-  <!-- JS del dashboard -->
-  <script src="/static/app.js"></script>
+  <!-- Modal mapa -->
+  <div id="mapModal" class="modal" aria-hidden="true">
+    <div class="box" role="dialog" aria-modal="true">
+      <div class="hdr">
+        <div id="mapTitle" style="color:#e6edf3;">Ubicación</div>
+        <div>
+          <button id="zoomIn">+</button>
+          <button id="zoomOut">-</button>
+          <button id="closeMap" class="close">Cerrar</button>
+        </div>
+      </div>
+      <div id="map"></div>
+    </div>
+  </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
