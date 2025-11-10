@@ -1,133 +1,120 @@
-// static/app.js
-const tbody = document.getElementById('tbody');
-const refreshBtn = document.getElementById('refresh');
-const onlySuspicious = document.getElementById('onlySuspicious');
-const searchInput = document.getElementById('search');
-const kpiSummary = document.getElementById('kpiSummary');
+// ==========================
+// ✅ TRADUCCIÓN A LENGUAJE HUMANO
+// ==========================
+function explain(event, dwell) {
 
-let events_cache = [];
+  if(event === "land")
+    return "Entró a la página";
 
-// Modal + Leaflet
-const modal = document.getElementById('mapModal');
-const closeMapBtn = document.getElementById('closeMap');
-let map, marker, circle;
+  if(event === "whatsapp_click")
+    return "Hizo clic real en el botón de WhatsApp";
 
-function openMap(lat, lon, title = '', radiusMeters = 300) {
-  modal.style.display = 'flex';
-  setTimeout(() => {
-    if(!map) {
-      map = L.map('map', {zoomControl:false}).setView([lat || 0, lon || 0], lat?15:2);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(map);
-    } else {
-      map.invalidateSize();
-      map.setView([lat || 0, lon || 0], lat?15:2);
-    }
-    if(marker) map.removeLayer(marker);
-    if(circle) map.removeLayer(circle);
-    if(lat && lon) {
-      marker = L.marker([lat, lon]).addTo(map).bindPopup(title);
-      circle = L.circle([lat, lon], { radius: radiusMeters, color: '#2bffbc', fillColor: '#2bffbc', fillOpacity: 0.15 }).addTo(map);
-      map.fitBounds(circle.getBounds(), { padding: [20,20] });
-    }
-  }, 50);
-}
-document.getElementById('zoomIn').addEventListener('click', ()=> map && map.zoomIn());
-document.getElementById('zoomOut').addEventListener('click', ()=> map && map.zoomOut());
-closeMapBtn.addEventListener('click', () => { modal.style.display = 'none'; });
-
-async function loadEvents() {
-  try {
-    const res = await fetch('/api/events?limit=300');
-    const j = await res.json();
-    events_cache = j.events || [];
-    renderTable();
-    renderKPIs();
-  } catch(err) {
-    console.error('Error cargando eventos', err);
+  if(event === "leave") {
+    if(!dwell) return "Salió rápidamente";
+    if(dwell < 800) return "Se fue en menos de 1 segundo (posible bot o clic inválido)";
+    if(dwell < 3000) return "Visitó la página pero se retiró rápido";
+    return "Estuvo navegando por la página con normalidad";
   }
+
+  return "Actividad detectada";
 }
 
-function renderKPIs(){
-  const total = events_cache.length;
-  const suspicious = events_cache.filter(e => e.risk && e.risk.suspicious).length;
-  const dwellSmall = events_cache.filter(e => e.dwell_ms && e.dwell_ms < 800).length;
-  kpiSummary.innerText = `Total: ${total} · Sospechosos: ${suspicious} · Dwell <800ms: ${dwellSmall}`;
+
+// ==========================
+// ✅ FUNCIONES DE TABLA
+// ==========================
+function renderRow(r){
+  const dwell = r.dwell_ms ?? 0;
+
+  return `
+    <tr>
+      <td>${r.ts}</td>
+      <td class="mono">${r.ip}</td>
+      <td>${r.city || "-"}, ${r.region || ""}<br>
+          <small>${r.isp || ""}</small>
+      </td>
+      <td>${r.type}</td>
+      <td>${r.ref || "-"}</td>
+      <td>${dwell ? dwell + " ms" : "-"}</td>
+
+      <td><span class="badge ${r.risk_level}">${r.risk_level}</span></td>
+
+      <td>${explain(r.type, dwell)}</td>
+
+      <td>
+        <button class="map-btn" onclick="openMap('${r.lat}','${r.lon}','${r.city}')">Ver mapa</button>
+      </td>
+    </tr>
+  `;
 }
 
-function renderTable(){
-  const q = (searchInput.value || '').trim().toLowerCase();
-  const onlyS = !!onlySuspicious.checked;
-  tbody.innerHTML = '';
 
-  events_cache.forEach(ev => {
-    const geo = ev.geo || {};
-    const city = geo.city || '-';
-    const region = geo.region || '-';
-    const isp = geo.isp || geo.org || geo.orgname || '-';
-    const lat = Number(geo.lat || geo.latitude || 0);
-    const lon = Number(geo.lon || geo.longitude || 0);
-    const evt = ev.type || '-';
+// ==========================
+// ✅ OBTENER DATOS DEL SERVIDOR
+// ==========================
+async function loadData(){
+  const onlySuspicious = document.getElementById("onlySuspicious").checked;
+  const search = document.getElementById("search").value.toLowerCase();
 
-    const rowText = `${ev.ip || ''} ${city} ${region} ${isp} ${evt} ${(ev.ref||'')} ${(ev.url||'')}`.toLowerCase();
-    if(q && !rowText.includes(q)) return;
-    if(onlyS && !(ev.risk && ev.risk.suspicious)) return;
+  let data = [];
+  try {
+    const res = await fetch("/api/events");
+    data = await res.json();
+  } catch (e) {}
 
-    const tr = document.createElement('tr');
+  if(onlySuspicious) {
+    data = data.filter(x => x.risk_level === "alto" || x.risk_level === "medio");
+  }
 
-    const tsTd = document.createElement('td');
-    tsTd.textContent = ev.ts ? new Date(ev.ts).toLocaleString() : '-';
-    tr.appendChild(tsTd);
+  if(search){
+    data = data.filter(x =>
+      (x.ip || "").toLowerCase().includes(search) ||
+      (x.city || "").toLowerCase().includes(search) ||
+      (x.region || "").toLowerCase().includes(search) ||
+      (x.isp || "").toLowerCase().includes(search) ||
+      (x.type || "").toLowerCase().includes(search)
+    );
+  }
 
-    const ipTd = document.createElement('td');
-    ipTd.innerHTML = `<span class="mono">${ev.ip || '-'}</span>`;
-    tr.appendChild(ipTd);
+  document.getElementById("tbody").innerHTML =
+    data.map(renderRow).join("");
 
-    const cityTd = document.createElement('td');
-    cityTd.innerHTML = `<strong>${city}</strong><div style="color:#9aa5b1;font-size:12px">${region} · ${isp}</div>`;
-    tr.appendChild(cityTd);
-
-    const typeTd = document.createElement('td');
-    typeTd.textContent = evt;
-    tr.appendChild(typeTd);
-
-    const refTd = document.createElement('td');
-    refTd.textContent = ev.ref || ev.url || '-';
-    tr.appendChild(refTd);
-
-    const dwellTd = document.createElement('td');
-    dwellTd.textContent = ev.dwell_ms ? `${ev.dwell_ms} ms` : '-';
-    tr.appendChild(dwellTd);
-
-    const riskTd = document.createElement('td');
-    const score = ev.risk && ev.risk.score ? ev.risk.score : 0;
-    let badge = 'bajo'; if(score >= 80) badge = 'alto'; else if(score >= 40) badge = 'medio';
-    const reasons = (ev.risk && ev.risk.reasons && ev.risk.reasons.length) ? ev.risk.reasons.join(', ') : '';
-    riskTd.innerHTML = `<span class="badge ${badge}">${score}${reasons ? ` (${reasons})` : ''}</span>`;
-    tr.appendChild(riskTd);
-
-    const actionTd = document.createElement('td');
-    const mapBtn = document.createElement('button');
-    mapBtn.className = 'map-btn'; mapBtn.textContent = 'Mapa';
-    mapBtn.onclick = () => openMap(lat, lon, `${ev.ip || ''} · ${city}`, 300);
-    actionTd.appendChild(mapBtn);
-
-    const blockBtn = document.createElement('button');
-    blockBtn.textContent = 'Bloquear IP'; blockBtn.style.marginLeft = '8px'; blockBtn.className = 'danger';
-    blockBtn.onclick = async () => {
-      try {
-        await fetch('/api/blocklist', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ip: ev.ip })});
-        await loadEvents();
-        alert('IP bloqueada.');
-      } catch(e){ console.error(e); alert('Error bloqueando'); }
-    };
-    actionTd.appendChild(blockBtn);
-
-    tr.appendChild(actionTd);
-    tbody.appendChild(tr);
-  });
+  // KPIs
+  document.getElementById("kpiSummary").innerText =
+    `Total: ${data.length}`;
 }
 
-refreshBtn.addEventListener('click', loadEvents);
-searchInput.addEventListener('input', renderTable);
-onlySuspicious.addEventListener('change', renderTable);
-loadEvents();
+
+// ==========================
+// ✅ MAPA MODAL
+// ==========================
+let map = null;
+
+function openMap(lat, lon, city){
+  const modal = document.getElementById("mapModal");
+  modal.style.display = "flex";
+
+  if(!map){
+    map = L.map('map').setView([lat,lon], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{}).addTo(map);
+  } else {
+    map.setView([lat,lon], 12);
+  }
+
+  L.marker([lat,lon]).addTo(map);
+  document.getElementById("mapTitle").innerText = "Ubicación aproximada: " + city;
+}
+
+document.getElementById("closeMap").onclick = () =>
+  document.getElementById("mapModal").style.display = "none";
+
+document.getElementById("zoomIn").onclick = () => map.zoomIn();
+document.getElementById("zoomOut").onclick = () => map.zoomOut();
+
+
+// ==========================
+// ✅ AUTO CARGA
+// ==========================
+loadData();
+document.getElementById("refresh").onclick = loadData;
+setInterval(loadData, 5000);
