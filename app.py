@@ -1,11 +1,24 @@
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from datetime import datetime, timezone, timedelta
 from collections import deque, defaultdict
 from functools import lru_cache
 import requests
 import re
 
+# ==================================================
+# ✅ INICIALIZAR APP + ACTIVAR CORS PARA TU DOMINIO
+# ==================================================
 app = Flask(__name__)
+
+CORS(app, resources={
+    r"/track": {
+        "origins": [
+            "https://medigoencas.com",
+            "https://www.medigoencas.com"
+        ]
+    }
+})
 
 # ====== Memoria ======
 EVENTS = deque(maxlen=8000)     # historial rotativo
@@ -54,15 +67,6 @@ def count_recent_clicks(ip: str, minutes: int) -> int:
     return len(dq)
 
 def compute_risk(ev: dict) -> dict:
-    """
-    Devuelve dict con score (0..100), razones y flags.
-    Reglas (puedes ajustar a gusto):
-      +30 si dwell < 800ms
-      +25 si UA parece bot
-      +25 si ref es google y falta gclid
-      +20 si repeticiones del IP en ventana (60 min) >= 3
-      +10 si país != CO (ajústalo si quieres filtrar Colombia)
-    """
     score = 0
     reasons = []
 
@@ -100,7 +104,9 @@ def compute_risk(ev: dict) -> dict:
         "reasons": reasons
     }
 
-# ====== Rutas ======
+# ==================================================
+# ✅ RUTAS
+# ==================================================
 
 @app.route("/")
 def home():
@@ -111,24 +117,19 @@ def track():
     data = request.get_json(force=True, silent=True) or {}
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr) or request.remote_addr
-    # Solo toma el primero si viene 'client, proxy'
     ip = (ip.split(",")[0]).strip() if ip else ip
 
-    # encola marca temporal para repetición
     LAST_SEEN[ip].append(datetime.now(timezone.utc))
 
     data["ip"] = ip
     data["ts"] = now_iso()
     data["blocked"] = ip in BLOCK
 
-    # Geo + ISP
     data["geo"] = geo_lookup(ip)
 
-    # Riesgo
     risk = compute_risk(data)
     data["risk"] = risk
 
-    # Autoblock si aplica
     if SETTINGS["risk_autoblock"] and risk["suspicious"]:
         BLOCK.add(ip)
         data["autoblocked"] = True
