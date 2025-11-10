@@ -36,9 +36,8 @@ function explain(event, dwell) {
 // ✅ TABLA
 // ==========================
 
-function renderRow(r) {
+function renderRow(r){
   const dwell = r.dwell_ms ?? 0;
-  const riskLevel = riskToLevel(r.risk?.score || 0);
 
   return `
     <tr>
@@ -46,24 +45,26 @@ function renderRow(r) {
       <td class="mono">${r.ip}</td>
 
       <td>
-        ${r.geo?.city || "-"}, ${r.geo?.region || ""}
-        <br><small>${r.geo?.isp || "-"}</small>
+        ${r.city || "-"}, ${r.region || ""}
+        <br><small>${r.isp || ""}</small>
       </td>
 
-      <td>${r.type}</td>
+      <td>${translateEvent(r.type)}</td>
+
       <td>${r.ref || "-"}</td>
       <td>${dwell ? dwell + " ms" : "-"}</td>
 
       <td>
-        <span class="badge ${riskLevel}">
-          ${riskLevel}
+        <span class="badge ${r.risk_level}">
+          ${r.risk_level}
         </span>
       </td>
 
       <td>${explain(r.type, dwell)}</td>
 
       <td>
-        <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">
+        <button class="map-btn"
+          onclick="openMap('${r.lat}','${r.lon}','${r.city}')">
           Ver mapa
         </button>
       </td>
