@@ -2,7 +2,7 @@
 // ✅ FUNCIONES DE APOYO
 // ==========================
 
-// Traducción del nivel de riesgo numérico del backend
+// Convertir score en nivel "bajo / medio / alto"
 function riskToLevel(score) {
   if (score >= 80) return "alto";
   if (score >= 40) return "medio";
@@ -10,61 +10,75 @@ function riskToLevel(score) {
 }
 
 // Traducción explicada para humanos
-function explain(event, dwell) {
-  if (event === "land")
+function explain(type, dwell) {
+
+  if (type === "land")
     return "Entró a la página";
 
-  if (event === "whatsapp_click")
+  if (type === "whatsapp_click")
     return "Hizo clic real en el botón de WhatsApp";
 
-  if (event === "leave") {
-    if (!dwell) return "Salió rápidamente";
+  if (type === "leave") {
+    if (!dwell) return "Salió muy rápido";
 
     if (dwell < 800)
-      return "Se fue en menos de 1 segundo (posible bot o clic inválido)";
+      return "Se fue en menos de 1 segundo (posible clic inválido o bot)";
 
     if (dwell < 3000)
       return "Visitó la página pero salió rápido";
 
-    return "Estuvo navegando normalmente en la página";
+    return "Navegó de forma normal por la página";
   }
 
   return "Actividad detectada";
 }
 
-// ==========================
-// ✅ TABLA
-// ==========================
+// Palabra del evento traducida
+function translateEvent(type){
+  if(type === "land") return "Entrada";
+  if(type === "leave") return "Salida";
+  if(type === "whatsapp_click") return "WhatsApp";
+  return type;
+}
 
-function renderRow(r){
-  const dwell = r.dwell_ms ?? 0;
+
+// ==========================
+// ✅ RENDER FILA
+// ==========================
+function renderRow(ev){
+
+  const dwell = ev.dwell_ms ?? 0;
+  const riskScore = ev.risk?.score ?? 0;
+  const riskLevel = riskToLevel(riskScore);
 
   return `
     <tr>
-      <td>${r.ts}</td>
-      <td class="mono">${r.ip}</td>
+      <td>${ev.ts}</td>
+
+      <td class="mono">${ev.ip}</td>
 
       <td>
-        ${r.city || "-"}, ${r.region || ""}
-        <br><small>${r.isp || ""}</small>
+        ${ev.geo?.city || "-"}, ${ev.geo?.region || ""}
+        <br><small>${ev.geo?.isp || ""}</small>
       </td>
 
-      <td>${translateEvent(r.type)}</td>
+      <td>${translateEvent(ev.type)}</td>
 
-      <td>${r.ref || "-"}</td>
+      <td>${ev.ref || "-"}</td>
+
       <td>${dwell ? dwell + " ms" : "-"}</td>
 
       <td>
-        <span class="badge ${r.risk_level}">
-          ${r.risk_level}
+        <span class="badge ${riskLevel}">
+          ${riskLevel}
         </span>
       </td>
 
-      <td>${explain(r.type, dwell)}</td>
+      <td>${explain(ev.type, dwell)}</td>
 
       <td>
         <button class="map-btn"
-          onclick="openMap('${r.lat}','${r.lon}','${r.city}')">
+                onclick="openMap(${ev.geo?.lat || 0}, ${ev.geo?.lon || 0}, '${ev.geo?.city || "-"}')">
           Ver mapa
         </button>
       </td>
@@ -72,68 +86,71 @@ function renderRow(r){
   `;
 }
 
-// ==========================
-// ✅ CARGA DE DATOS DESDE SERVIDOR
-// ==========================
 
-async function loadData() {
-  const onlySuspicious = document.getElementById("onlySuspicious").checked;
+// ==========================
+// ✅ CARGA DE DATOS (CORREGIDO)
+// ==========================
+async function loadData(){
+
+  const onlySusp = document.getElementById("onlySuspicious").checked;
   const search = document.getElementById("search").value.toLowerCase();
 
-  let data = [];
+  let events = [];
 
   try {
-    // ✅ FIX IMPORTANTE: ruta correcta al backend
+    // ✅ FIX CLAVE: URL correcta del backend
     const res = await fetch("https://clikguardian.onrender.com/api/events");
-    const json = await res.json();
-    data = json.events || [];
-  } catch (e) {
-    console.error("Error cargando eventos", e);
+    const j = await res.json();
+    events = j.events || [];
+  } catch (err){
+    console.error("Error cargando eventos:", err);
   }
 
   // Filtrar sospechosos
-  if (onlySuspicious) {
-    data = data.filter(ev => riskToLevel(ev.risk?.score || 0) !== "bajo");
+  if (onlySusp) {
+    events = events.filter(ev => riskToLevel(ev.risk?.score ?? 0) !== "bajo");
   }
 
   // Filtro de búsqueda
-  if (search) {
-    data = data.filter(x =>
-      (x.ip || "").toLowerCase().includes(search) ||
-      (x.geo?.city || "").toLowerCase().includes(search) ||
-      (x.geo?.region || "").toLowerCase().includes(search) ||
-      (x.geo?.isp || "").toLowerCase().includes(search) ||
-      (x.type || "").toLowerCase().includes(search)
+  if (search){
+    events = events.filter(ev =>
+      (ev.ip || "").toLowerCase().includes(search) ||
+      (ev.geo?.city || "").toLowerCase().includes(search) ||
+      (ev.geo?.region || "").toLowerCase().includes(search) ||
+      (ev.geo?.isp || "").toLowerCase().includes(search) ||
+      (ev.type || "").toLowerCase().includes(search)
     );
   }
 
   // Pintar tabla
   document.getElementById("tbody").innerHTML =
-    data.map(renderRow).join("");
+    events.map(renderRow).join("");
 
   // KPI
-  document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
+  document.getElementById("kpiSummary").innerText =
+    `Total: ${events.length}`;
 }
+
 
 // ==========================
 // ✅ MAPA MODAL
 // ==========================
-
 let map = null;
 
-function openMap(lat, lon, city) {
+function openMap(lat, lon, city){
+
   const modal = document.getElementById("mapModal");
   modal.style.display = "flex";
 
-  if (!map) {
-    map = L.map('map').setView([lat, lon], 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {})
-      .addTo(map);
+  if (!map){
+    map = L.map('map').setView([lat, lon], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
   } else {
-    map.setView([lat, lon], 12);
+    map.setView([lat, lon], 13);
   }
 
   L.marker([lat, lon]).addTo(map);
+
   document.getElementById("mapTitle").innerText =
     "Ubicación aproximada: " + city;
 }
@@ -144,10 +161,10 @@ document.getElementById("closeMap").onclick =
 document.getElementById("zoomIn").onclick = () => map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map.zoomOut();
 
-// ==========================
-// ✅ AUTO-RECARGA
-// ==========================
 
+// ==========================
+// ✅ AUTO RECARGA
+// ==========================
 loadData();
 document.getElementById("refresh").onclick = loadData;
 setInterval(loadData, 5000);
