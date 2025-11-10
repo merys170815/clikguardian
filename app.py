@@ -40,20 +40,23 @@ BOT_UA_PAT = re.compile(
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
-
 @lru_cache(maxsize=20000)
 def geo_lookup(ip: str):
-    """Devuelve {country, region, city, org} usando ipapi.co (cacheado en memoria)."""
+    """Geo e ISP usando ipwho.is (gratis y sin límites)."""
     try:
+        # IP locales no deben consultarse
         if ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168.") or ip == "::1":
             return {"country": "LOCAL", "region": "-", "city": "-", "org": "LAN"}
-        r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=4)
+
+        # Consulta al API de ipwho.is
+        r = requests.get(f"https://ipwho.is/{ip}", timeout=4)
         j = r.json() if r.ok else {}
+
         return {
-            "country": j.get("country_name") or j.get("country") or "-",
-            "region":  j.get("region") or j.get("region_code") or "-",
+            "country": j.get("country") or "-",
+            "region":  j.get("region") or "-",
             "city":    j.get("city") or "-",
-            "org":     j.get("org") or j.get("asn") or "-",
+            "org":     j.get("connection", {}).get("isp") or "-"
         }
     except Exception:
         return {"country": "-", "region": "-", "city": "-", "org": "-"}
