@@ -51,8 +51,11 @@ function renderRow(ev){
   const riskScore = ev.risk?.score ?? 0;
   const riskLevel = riskToLevel(riskScore);
 
+  // ✅ si es clic a WhatsApp, la fila tendrá una clase especial
+  const rowClass = ev.type === "whatsapp_click" ? "row-whatsapp" : "";
+
   return `
-    <tr>
+    <tr class="${rowClass}">
       <td>${ev.ts}</td>
 
       <td class="mono">${ev.ip}</td>
