@@ -11,15 +11,17 @@
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
       background: #0d1117;
       color: #e6edf3;
+      overflow-x: hidden;
     }
 
+    /* HEADER FIJO */
     header {
       padding: 18px 22px;
       border-bottom: 1px solid #1e2637;
       background: #111827;
       position: sticky;
       top: 0;
-      z-index: 10;
+      z-index: 20; /* Más alto para que nunca lo tape la tabla */
     }
 
     h1 {
@@ -35,7 +37,7 @@
 
     .wrap {
       max-width: 1200px;
-      margin: 20px auto;
+      margin: 85px auto 20px; /* deja un espacio para que la tabla nunca se meta debajo del header */
       padding: 0 20px;
     }
 
@@ -53,7 +55,6 @@
       background: #0f1420;
       color: #e6edf3;
       border-radius: 6px;
-      outline: none;
     }
 
     button {
@@ -65,9 +66,7 @@
       cursor: pointer;
     }
 
-    button:hover {
-      background: #232a3d;
-    }
+    button:hover { background: #232a3d; }
 
     button.danger {
       border-color: #5f1b20;
@@ -94,8 +93,8 @@
     th {
       background: #111827;
       position: sticky;
-      top: 65px;
-      z-index: 5;
+      top: 70px;  /* ALTURA EXACTA del header */
+      z-index: 10;
     }
 
     .mono {
@@ -137,7 +136,9 @@
     }
   </style>
 </head>
+
 <body>
+
   <header>
     <h1>ClickGuardian</h1>
     <div class="sub">Sistema Profesional Anti Clicks Inválidos</div>
@@ -172,11 +173,15 @@
             <th>Acción</th>
           </tr>
         </thead>
+
         <tbody id="tbody"></tbody>
       </table>
     </div>
+
   </div>
+
   <!-- JS del dashboard -->
   <script src="/static/app.js"></script>
+
 </body>
 </html>
