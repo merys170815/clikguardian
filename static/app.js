@@ -1,115 +1,89 @@
-// =============================================
-// ✅ ClickGuardian Dashboard JS
-// =============================================
+// static/app.js
+const tbody = document.getElementById("tbody");
+const onlySusp = document.getElementById("onlySuspicious");
+const search = document.getElementById("search");
+const btnRefresh = document.getElementById("refresh");
+const kpis = document.getElementById("kpis");
 
-async function loadEvents() {
-  try {
-    const onlySuspicious = document.getElementById("onlySuspicious").checked;
-    const search = document.getElementById("search").value.toLowerCase();
-
-    const resp = await fetch("/api/events");
-    const json = await resp.json();
-    let rows = json.events || [];
-
-    // Filtro "solo sospechosos"
-    if (onlySuspicious) {
-      rows = rows.filter(ev => (ev.risk || 0) >= 60);
-    }
-
-    // Filtro de búsqueda
-    if (search) {
-      rows = rows.filter(ev =>
-        JSON.stringify(ev).toLowerCase().includes(search)
-      );
-    }
-
-    // Renderizado tabla
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = "";
-
-    rows.forEach(ev => {
-      tbody.innerHTML += row(ev);
-    });
-
-    // Actualizar KPIs
-    updateKPIs(rows);
-
-  } catch (e) {
-    console.error("❌ Error cargando eventos:", e);
-  }
-}
-
-// =============================================
-// ✅ Genera un badge (Riesgo)
-// =============================================
 function badge(score) {
-  if (score >= 80) return `<span class="badge alto">Alto</span>`;
-  if (score >= 40) return `<span class="badge medio">Medio</span>`;
-  return `<span class="badge bajo">Bajo</span>`;
+  if (score >= 80) return '<span class="badge alto">Alto</span>';
+  if (score >= 40) return '<span class="badge medio">Medio</span>';
+  return '<span class="badge bajo">Bajo</span>';
 }
 
-// =============================================
-// ✅ Render de cada fila de la tabla
-// =============================================
 function row(ev) {
-  let geo = ev.geo || {};
-  let city = geo.city || geo.region || "--";
-  let loc = geo.locality || "--";
-  let isp = geo.org || "--";
-  let ua = ev.ua || "--";
-  let ref = ev.ref || "--";
-  let dw = ev.dwell_ms ? ev.dwell_ms + " ms" : "--";
+  const geo = ev.geo || {};
+  const risk = ev.risk || { score: 0, reasons: [] };
+  const city = geo.city || "-";
+  const region = geo.region || "-";
+  const isp = geo.org || "-";
+  const ua = ev.ua || "-";
+  const ref = ev.ref || "-";
+  const dwell = ev.dwell_ms != null ? `${Math.round(ev.dwell_ms)} ms` : "-";
+  const razon = (risk.reasons || []).join(" · ");
 
   return `
-    <tr>
-      <td>${ev.ts}</td>
-      <td>${ev.ip}</td>
-      <td>${city}</td>
-      <td class="mono">${ua}</td>
-      <td>${ref}</td>
-      <td>${dw}</td>
-      <td>${badge(ev.risk || 0)}</td>
-      <td>
-        <button onclick="blockIP('${ev.ip}')">Bloquear</button>
-      </td>
-    </tr>
-  `;
+  <tr>
+    <td>${new Date(ev.ts).toLocaleString()}</td>
+    <td class="mono">${ev.ip}</td>
+    <td>${city} / ${region}<br><span class="mono" style="opacity:.7">${isp}</span></td>
+    <td title="${ua}">${ua.substring(0, 48)}${ua.length>48?"…":""}</td>
+    <td>${ref}</td>
+    <td>${dwell}</td>
+    <td>${badge(risk.score)}<br><small>${razon || "-"}</small></td>
+    <td>
+      <button class="danger" onclick="blockIP('${ev.ip}')">Bloquear IP</button>
+    </td>
+  </tr>`;
 }
 
-// =============================================
-// ✅ KPIs (arriba de la tabla)
-// =============================================
-function updateKPIs(rows) {
-  const total = rows.length;
-  const suspicious = rows.filter(r => (r.risk || 0) >= 60).length;
+async function fetchEvents() {
+  const r = await fetch("/api/events?limit=300");
+  const j = await r.json();
+  let list = j.events || [];
 
-  document.getElementById("kpis").innerHTML = `
-    <div class="badge bajo">Total: ${total}</div>
+  const q = (search.value || "").toLowerCase().trim();
+  if (q) {
+    list = list.filter(e => {
+      const geo = e.geo || {};
+      const hay = [
+        e.ip, e.ua, e.ref, (geo.city||""), (geo.region||""), (geo.org||"")
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  if (onlySusp.checked) {
+    list = list.filter(e => (e.risk && e.risk.score >= 80));
+  }
+
+  tbody.innerHTML = list.map(row).join("");
+
+  // KPIs
+  const total = j.events?.length || 0;
+  const suspicious = j.events?.filter(e => e.risk && e.risk.score >= 80).length || 0;
+  const fast = j.events?.filter(e => (e.dwell_ms || 0) < 800).length || 0;
+  kpis.innerHTML = `
+    <div class="badge">Total: ${total}</div>
     <div class="badge alto">Sospechosos: ${suspicious}</div>
+    <div class="badge medio">Dwell < 800ms: ${fast}</div>
   `;
 }
 
-// =============================================
-// ✅ Enviar IP al backend para bloquear
-// =============================================
 async function blockIP(ip) {
-  if (!confirm(`¿Seguro que deseas bloquear la IP ${ip}?`)) return;
-
   await fetch("/api/blocklist", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({ ip })
   });
-
-  loadEvents();
+  fetchEvents();
 }
 
-// =============================================
-// ✅ Asignar eventos a los botones
-// =============================================
-document.getElementById("refresh").onclick = loadEvents;
-document.getElementById("onlySuspicious").onclick = loadEvents;
-document.getElementById("search").oninput = loadEvents;
+btnRefresh?.addEventListener("click", fetchEvents);
+onlySusp?.addEventListener("change", fetchEvents);
+search?.addEventListener("input", () => {
+  // filtra en vivo sin pedir al server
+  fetchEvents();
+});
 
-// ✅ Carga inicial
-loadEvents();
+fetchEvents();
+setInterval(fetchEvents, 20000);
