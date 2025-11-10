@@ -5,159 +5,185 @@
   <title>ClickGuardian — Panel Anti Clicks Inválidos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Leaflet (mapa) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
   <style>
-    :root{ --bg:#0d1117; --panel:#0f1720; --muted:#9aa5b1; --accent:#0ea5a4; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
-      background: var(--bg);
-      color: #e6edf3;
-    }
-    header {
-      padding: 12px 22px;
-      border-bottom: 1px solid #1e2637;
-      background: #0b1220;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-    }
-    h1 { margin: 0; font-size: 20px; font-weight: 600; }
-    .sub { font-size: 12px; opacity: .75; color: var(--muted); }
-    .wrap {
-      max-width: 1200px;
-      margin: 18px auto;
-      padding: 0 18px 40px;
+    :root{
+      --header-h:60px;
+      --controls-h:58px;
+      --bg:#0d1117;
+      --muted:#9aa5b1;
     }
 
-    /* CONTROLES: fijo por debajo del header */
-    .controls {
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      align-items:center;
-      padding:10px 0;
-      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
-      position: sticky;
-      top: 56px; /* altura del header */
-      z-index: 40;
+    body{
+      margin:0;
+      background:var(--bg);
+      font-family:system-ui,Roboto;
+      color:#e6edf3;
+    }
+
+    /* HEADER FIJO */
+    header{
+      position:fixed; top:0; left:0; right:0;
+      height:var(--header-h);
+      background:#0b1220;
+      padding:10px 22px;
+      border-bottom:1px solid #1e2637;
+      z-index:1000;
+    }
+    h1{margin:0;font-size:20px;font-weight:600;}
+    .sub{font-size:12px;opacity:.7;color:var(--muted);}
+
+    /* CONTROLES FIJOS */
+    .controls{
+      position:fixed; top:var(--header-h);
+      left:0; right:0;
+      height:var(--controls-h);
+      background:#0f1720;
+      padding:10px 20px;
+      z-index:900;
+      display:flex; gap:10px; align-items:center;
       border-bottom:1px solid #141a24;
     }
 
-    input[type="text"]{
+    input[type=text]{
       padding:8px 10px;
       border-radius:6px;
       border:1px solid #23303b;
       background:#081018;
-      color: #e6edf3;
+      color:#e6edf3;
       min-width:240px;
     }
-    button{ padding:8px 12px; border-radius:6px; border:1px solid #26313b; background:#0f1720; color:#e6edf3; cursor:pointer; }
-    button.danger{ background:#2a0f12; border-color:#5f1b20; }
+    button{
+      padding:8px 12px;
+      border-radius:6px;
+      border:1px solid #26313b;
+      background:#1a2532;
+      color:#e6edf3;
+      cursor:pointer;
+    }
 
-    /* Contenedor tabla con scroll */
-    .table-wrap {
-      overflow:auto;
-      max-height: calc(72vh - 28px);
+    /* WRAP GENERAL */
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      padding: calc(var(--header-h) + var(--controls-h) + 20px) 20px 40px;
+    }
+
+    /* TABLA */
+    .table-wrap{
+      border:1px solid #1e2637;
       border-radius:10px;
-      border: 1px solid #1e2637;
-      margin-top: 12px;
+      overflow:auto;
+      max-height:72vh;
+      margin-top:10px;
     }
 
-    table { width:100%; border-collapse:collapse; min-width: 980px; }
-    th, td { text-align:left; padding:12px; border-bottom:1px solid #111827; vertical-align:top; font-size:14px; color:#dfe7ee;}
-    thead th {
-      background: linear-gradient(180deg,#0b1320,#07111a);
-      position: sticky;
-      top: calc(56px + 48px); /* header + controls (ajusta si cambias su altura) */
-      z-index: 30;
-    }
-
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cbe7ff;}
-    .badge{ padding:4px 8px; border-radius:999px; font-size:12px; }
-    .badge.alto{ background:#3a0f12; color:#ffb3b8; }
-    .badge.medio{ background:#3a341b; color:#ffe2a8; }
-    .badge.bajo{ background:#08321f; color:#b7ffd9; }
-
-    /* Botón pequeño para abrir mapa */
-    .map-btn { padding:6px 8px; font-size:13px; border-radius:6px; background:#0b5; color:#041; border:none; cursor:pointer; }
-
-    /* Modal mapa */
-    .modal {
-      display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center;
-      background: rgba(0,0,0,0.6);
-    }
-    .modal .box {
-      width: 90%;
-      max-width:900px;
-      height: 70vh;
-      background: #071018;
-      border-radius:8px;
+    table{ width:100%; min-width:950px; border-collapse:collapse; }
+    th,td{
+      padding:12px;
+      font-size:14px;
+      border-bottom:1px solid #111827;
+      white-space:nowrap;
       overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    thead th{
+      position:sticky;
+      top:calc(var(--header-h) + var(--controls-h));
+      background:#0b1320;
+      z-index:800;
+    }
+
+    /* BADGES */
+    .badge{
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:12px;
+    }
+    .b-whatsapp{ background:#0f5132; color:#7dffbd; }
+    .b-land{ background:#112; color:#88c; }
+    .b-leave{ background:#331; color:#fb8; }
+    .b-click{ background:#113; color:#5bf; }
+
+    .badge.alto{background:#3a0f12;color:#ffb3b8;}
+    .badge.medio{background:#3a341b;color:#ffe2a8;}
+    .badge.bajo{background:#08321f;color:#b7ffd9;}
+
+    /* MODAL MAPA */
+    .modal{
+      display:none;
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.6);
+      z-index:2000;
+      align-items:center; justify-content:center;
+    }
+    .modal .box{
+      width:90%; max-width:900px; height:70vh;
+      background:#071018;
+      border-radius:8px;
       border:1px solid #122028;
+      overflow:hidden;
       display:flex; flex-direction:column;
     }
-    .modal .box .hdr { padding:10px 12px; display:flex; justify-content:space-between; align-items:center; background:#07131a; }
-    #map { flex:1; }
-    .close { background:#1e293b; color:#fff; padding:6px 8px; border-radius:6px; border:none; cursor:pointer; }
+    .hdr{ padding:10px; background:#07131a; display:flex; justify-content:space-between; }
+    .close{ background:#1e293b;color:#fff;padding:6px 10px;border-radius:6px;border:none;cursor:pointer; }
 
-    @media (max-width:900px){
-      thead th{ top:110px; }
-    }
   </style>
 </head>
+
 <body>
-  <header>
-    <h1>ClickGuardian</h1>
-    <div class="sub">Sistema Profesional Anti Clicks Inválidos</div>
-  </header>
 
-  <div class="wrap">
-    <div class="controls">
-      <input id="search" type="text" placeholder="Buscar por IP, UA, ciudad, ISP…" />
-      <label style="display:flex;align-items:center;gap:8px;color:var(--muted);">
-        <input id="onlySuspicious" type="checkbox"/> Solo sospechosos
-      </label>
-      <button id="refresh">Actualizar</button>
-      <div style="margin-left:auto;color:var(--muted);" id="kpiSummary"></div>
-    </div>
+<header>
+  <h1>ClickGuardian</h1>
+  <div class="sub">Sistema Profesional Anti Clicks Inválidos</div>
+</header>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Fecha / Hora</th>
-            <th>IP</th>
-            <th>Ciudad / Región / ISP</th>
-            <th>User-Agent</th>
-            <th>Ref</th>
-            <th>Dwell</th>
-            <th>Riesgo</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
+<div class="controls">
+  <input id="search" type="text" placeholder="Buscar por IP, ciudad, ISP, evento…" />
+  <label style="display:flex;gap:8px;color:var(--muted);">
+    <input id="onlySuspicious" type="checkbox"> Solo sospechosos
+  </label>
+  <button id="refresh">Actualizar</button>
+  <div id="kpiSummary" style="margin-left:auto;color:var(--muted);"></div>
+</div>
+
+<div class="wrap">
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha/Hora</th>
+          <th>IP</th>
+          <th>Ciudad / Región / ISP</th>
+          <th>Evento</th>
+          <th>Ref</th>
+          <th>Dwell</th>
+          <th>Riesgo</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
   </div>
 
-  <!-- Modal mapa -->
-  <div id="mapModal" class="modal" aria-hidden="true">
-    <div class="box" role="dialog" aria-modal="true">
-      <div class="hdr">
-        <div id="mapTitle" style="color:#e6edf3;">Ubicación</div>
-        <div>
-          <button id="zoomIn">+</button>
-          <button id="zoomOut">-</button>
-          <button id="closeMap" class="close">Cerrar</button>
-        </div>
-      </div>
-      <div id="map"></div>
-    </div>
-  </div>
+</div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js"></script>
+<!-- Modal mapa -->
+<div id="mapModal" class="modal">
+  <div class="box">
+    <div class="hdr">
+      <div id="mapTitle" style="color:#e6edf3;">Ubicación</div>
+      <button id="closeMap" class="close">Cerrar</button>
+    </div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/app.js"></script>
+
 </body>
 </html>
