@@ -40,28 +40,71 @@ function origen(r) {
 }
 
 // ==========================
-// Bloqueo / Desbloqueo desde panel
+// Bloqueo / Desbloqueo (IP + Device ID)
 // ==========================
+
+// ✅ Bloquear IP
 async function blockIp(ip){
   try{
-    await fetch("/api/blocklist", {
+    await fetch("/api/blockips", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ ip })
     });
     loadData();
-  }catch(e){ console.error(e); alert("Error al bloquear"); }
+  }catch(e){
+    console.error(e);
+    alert("Error al bloquear IP");
+  }
 }
 
+// ✅ Desbloquear IP
 async function unblockIp(ip){
   try{
-    await fetch("/api/blocklist", {
+    await fetch("/api/blockips", {
       method: "DELETE",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ ip })
     });
     loadData();
-  }catch(e){ console.error(e); alert("Error al desbloquear"); }
+  }catch(e){
+    console.error(e);
+    alert("Error al desbloquear IP");
+  }
+}
+
+// ✅ Bloquear dispositivo por DeviceID
+async function blockDevice(device_id, fallbackIp){
+  if (!device_id) return blockIp(fallbackIp);
+
+  try{
+    await fetch("/api/blockdevices", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ device_id })
+    });
+    loadData();
+  }catch(e){
+    console.error(e);
+    alert("Error al bloquear el dispositivo");
+  }
+}
+
+// ✅ Desbloquear dispositivo por DeviceID
+async function unblockDevice(device_id, fallbackIp){
+  if (!device_id) return unblockIp(fallbackIp);
+
+  try{
+    await fetch("/api/blockdevices", {
+      method: "DELETE",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ device_id })
+    });
+    loadData();
+  }catch(e){
+    console.error(e);
+    alert("Error al desbloquear el dispositivo");
+  }
 }
 
 // ==========================
@@ -71,43 +114,37 @@ function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
-  // ✅ identificar bloqueos
   const blocked = r.blocked ? true : false;
-  const blockedBy = r.autoblocked?.by || (r.device_id && r.blocked ? "device" : (r.blocked ? "ip" : null));
+  const by = r.autoblocked?.by || (r.device_id && r.blocked ? "device" : (r.blocked ? "ip" : null));
 
   return `
-    <tr class="
-      ${isWA ? 'row-whatsapp' : ''} 
-      ${blocked ? 'row-blocked' : ''}
-    ">
+    <tr class="${isWA ? 'row-whatsapp' : ''} ${blocked ? 'row-blocked' : ''}">
       <td>${r.ts}</td>
       <td class="mono">${r.ip}</td>
-      
-      <!-- ✅ mostramos el DEVICE ID -->
+
       <td class="mono" style="max-width:200px; white-space:normal;">
         ${r.device_id || "<span style='opacity:.4'>-</span>"}
       </td>
 
       <td>${r.geo?.city || "-"}, ${r.geo?.region || ""}<br>
-          <small>${r.geo?.isp || ""}</small>
-      </td>
+          <small>${r.geo?.isp || ""}</small></td>
 
       <td>${translateEvent(r.type)}</td>
       <td>${r.ref || "-"}</td>
       <td>${origen(r)}</td>
 
       <td>${dwell ? dwell + " ms" : "-"}</td>
-      <td><span class="badge ${riskToLevel(r.risk?.score || 0)}">
-        ${riskToLevel(r.risk?.score || 0)}
-      </span></td>
 
-      <!-- ✅ Estado del dispositivo -->
       <td>
-        ${
-          blocked
-            ? `<strong style="color:#ef4444">Bloqueado (${blockedBy})</strong>`
-            : `<span style="color:#10b981">Activo</span>`
-        }
+        <span class="badge ${riskToLevel(r.risk?.score || 0)}">
+          ${riskToLevel(r.risk?.score || 0)}
+        </span>
+      </td>
+
+      <td>
+        ${blocked
+          ? `<strong style="color:#ef4444">Bloqueado (${by})</strong>`
+          : `<span style="color:#10b981">Activo</span>`}
       </td>
 
       <td>
@@ -124,7 +161,6 @@ function renderRow(r) {
     </tr>
   `;
 }
-
 
 // ==========================
 // Cargar datos
@@ -158,36 +194,38 @@ async function loadData() {
     );
   }
 
-  document.getElementById("tbody").innerHTML =
-    data.map(renderRow).join("");
-
+  document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
   document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
 }
 
 // ==========================
-// Map modal (igual que antes)
+// Mapa
 // ==========================
 let map = null;
 
 function openMap(lat, lon, city) {
   const modal = document.getElementById("mapModal");
   modal.style.display = "flex";
+
   if (!map) {
     map = L.map('map').setView([lat, lon], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {}).addTo(map);
   } else {
     map.setView([lat, lon], 12);
   }
+
   L.marker([lat, lon]).addTo(map);
   document.getElementById("mapTitle").innerText = "Ubicación aproximada: " + city;
 }
 
-document.getElementById("closeMap").onclick = () => document.getElementById("mapModal").style.display = "none";
+document.getElementById("closeMap").onclick = () =>
+  document.getElementById("mapModal").style.display = "none";
+
 document.getElementById("zoomIn").onclick = () => map && map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
 
 // ==========================
-// Auto-reload
+// Auto reload
 // ==========================
 loadData();
 document.getElementById("refresh").onclick = loadData;
