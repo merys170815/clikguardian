@@ -261,6 +261,9 @@ def block_device():
     d = data.get("device_id")
     BLOCK_DEVICES.add(d)
     return jsonify({"ok": True})
+@app.get("/")
+def root():
+    return "<h1>✅ ClickGuardian corriendo</h1>"
 
 @app.post("/api/blockips")
 def block_ip():
