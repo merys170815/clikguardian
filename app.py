@@ -38,15 +38,40 @@ LAST_SEEN_DEVICE = defaultdict(deque)
 LAST_SEEN_IP     = defaultdict(deque)
 
 SETTINGS = {
-    "risk_autoblock": True,
-    "risk_threshold": 80,
     "repeat_window_seconds": 60,
-    "repeat_window_min": 60,
-    "repeat_required": 2,
-    "fast_dwell_ms": 600,
-    "fast_repeat_required": 3,
+    "repeat_required": 4,          # antes 2 — ahora más tolerante
+
+    "fast_dwell_ms": 400,          # antes 800 — ahora menos sensible
     "min_good_dwell_ms": 2000,
-    "good_dwell_window_minutes": 5
+
+    "daily_soft_mask": 6,          # antes 3 — ahora no enmascara tan rápido
+    "daily_soft_mask_hours": 3,    # antes 6 horas
+
+    "daily_soft_block": 10,        # antes 5 — ahora mucho más realista
+    "daily_soft_block_hours": 48,  # antes 72h
+
+    "daily_perm_block": 15,        # antes 7 — ahora más lógico
+
+    "ghost_grace_seconds": 18,     # antes 10s — ahora más tiempo para interactuar
+    "ghost_mask_hours": 6,
+    "ghost_block_hours": 48,
+
+    "vpn_mask": True,
+    "vpn_block_on_repeats": 4,     # antes 2 — ahora menos agresivo
+    "vpn_block_hours": 48,
+
+    "refresh_window_seconds": 120,
+    "refresh_threshold": 5,        # antes 3 — ahora más tolerante
+    "refresh_mask_hours": 4,
+    "refresh_block_hours": 24,
+
+    "night_start_hour": 0,
+    "night_end_hour": 5,
+    "night_repeat_to_block": 6,    # antes 3 — ahora no bloquea tan fácil
+    "night_block_hours": 12,
+
+    "risk_autoblock": True,
+    "risk_threshold": 88           # antes 80 — menos sensibles los riesgos
 }
 
 BOT_UA_PAT = re.compile(
