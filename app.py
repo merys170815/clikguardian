@@ -13,14 +13,19 @@ import requests, re, logging
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# ==========================
-# ✅ CORS
-# ==========================
+## ✅ CORS — necesario para conectar con tu web en producción
 CORS(app, resources={
-    r"/track": {"origins": "*"},
-    r"/guard": {"origins": "*"},
-    r"/api/*": {"origins": "*"}
+    r"/track": {"origins": [
+        "https://medigoencas.com",
+        "https://www.medigoencas.com",
+        "https://clikguardian.onrender.com",
+        "http://localhost",
+        "http://127.0.0.1"
+    ]},
+    r"/api/*": {"origins": "*"},
+    r"/guard": {"origins": "*"}
 })
+
 
 # ==========================
 # ✅ Estado
