@@ -1,8 +1,8 @@
-# ======================================================
-# ✅ ClickGuardian — versión estable funcional
-# ======================================================
+# --------------------------------------------------------
+# ✅ ClickGuardian — Back-end con bloqueo inmediato real
+# --------------------------------------------------------
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect
 from flask_cors import CORS
 from datetime import datetime, timezone, timedelta
 from collections import deque, defaultdict
@@ -12,7 +12,9 @@ import requests, re, logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 app = Flask(__name__)
 
+# --------------------------------------------------------
 # ✅ CORS
+# --------------------------------------------------------
 CORS(app, resources={
     r"/track": {"origins": [
         "https://medigoencas.com",
@@ -25,7 +27,9 @@ CORS(app, resources={
     r"/guard": {"origins": "*"}
 })
 
-# ✅ Estado global
+# --------------------------------------------------------
+# ✅ Estado global (en memoria)
+# --------------------------------------------------------
 EVENTS = deque(maxlen=30000)
 
 BLOCK_DEVICES = set()
@@ -38,40 +42,15 @@ LAST_SEEN_DEVICE = defaultdict(deque)
 LAST_SEEN_IP     = defaultdict(deque)
 
 SETTINGS = {
-    "repeat_window_seconds": 60,
-    "repeat_required": 4,          # antes 2 — ahora más tolerante
-
-    "fast_dwell_ms": 400,          # antes 800 — ahora menos sensible
-    "min_good_dwell_ms": 2000,
-
-    "daily_soft_mask": 6,          # antes 3 — ahora no enmascara tan rápido
-    "daily_soft_mask_hours": 3,    # antes 6 horas
-
-    "daily_soft_block": 10,        # antes 5 — ahora mucho más realista
-    "daily_soft_block_hours": 48,  # antes 72h
-
-    "daily_perm_block": 15,        # antes 7 — ahora más lógico
-
-    "ghost_grace_seconds": 18,     # antes 10s — ahora más tiempo para interactuar
-    "ghost_mask_hours": 6,
-    "ghost_block_hours": 48,
-
-    "vpn_mask": True,
-    "vpn_block_on_repeats": 4,     # antes 2 — ahora menos agresivo
-    "vpn_block_hours": 48,
-
-    "refresh_window_seconds": 120,
-    "refresh_threshold": 5,        # antes 3 — ahora más tolerante
-    "refresh_mask_hours": 4,
-    "refresh_block_hours": 24,
-
-    "night_start_hour": 0,
-    "night_end_hour": 5,
-    "night_repeat_to_block": 6,    # antes 3 — ahora no bloquea tan fácil
-    "night_block_hours": 12,
-
     "risk_autoblock": True,
-    "risk_threshold": 88           # antes 80 — menos sensibles los riesgos
+    "risk_threshold": 80,
+    "repeat_window_seconds": 60,
+    "repeat_window_min": 60,
+    "repeat_required": 2,
+    "fast_dwell_ms": 600,
+    "fast_repeat_required": 3,
+    "min_good_dwell_ms": 2000,
+    "good_dwell_window_minutes": 5
 }
 
 BOT_UA_PAT = re.compile(
@@ -79,7 +58,9 @@ BOT_UA_PAT = re.compile(
     re.I
 )
 
+# --------------------------------------------------------
 # ✅ Helpers
+# --------------------------------------------------------
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -137,6 +118,9 @@ def touches_in_window_ip(ip: str, seconds: int):
     return count_recent(LAST_SEEN_IP[ip], seconds)
 
 def had_good_dwell_recently(device_id: str, minutes: int, min_ms: int) -> bool:
+    if not device_id:
+        return False
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
 
     for ev in reversed(EVENTS):
@@ -192,33 +176,65 @@ def compute_risk(ev: dict):
 
     return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
 
+# --------------------------------------------------------
+# ✅ BLOQUEO INMEDIATO (antes de cargar cualquier página)
+# --------------------------------------------------------
+@app.before_request
+def proteger_rutas():
+
+    # permitir recursos estáticos y página de bloqueo
+    if request.path in ["/bloqueado.html", "/favicon.ico"] or request.path.startswith("/static/"):
+        return None
+
+    device_id = request.cookies.get("device_id")
+    ip = get_client_ip()
+
+    # bloqueado por device
+    if device_id and device_id in BLOCK_DEVICES:
+        return redirect("/bloqueado.html")
+
+    # bloqueado por IP
+    if ip in BLOCK_IPS:
+        return redirect("/bloqueado.html")
+
+    return None
+
+# --------------------------------------------------------
 # ✅ UI
+# --------------------------------------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
+# --------------------------------------------------------
 # ✅ GUARD API
+# --------------------------------------------------------
 @app.post("/guard")
 def guard():
     data = request.get_json(force=True, silent=True) or {}
     device_id = (data.get("device_id") or "").strip()
     ip = get_client_ip()
 
+    # whitelist
     if device_id in WHITELIST_DEVICES:
         return jsonify({"blocked": False, "by": "whitelist"})
 
     if ip in WHITELIST_IPS:
         return jsonify({"blocked": False, "by": "whitelist"})
 
+    # block device
     if device_id and device_id in BLOCK_DEVICES:
         return jsonify({"blocked": True, "by": "device"}), 403
 
+    # block ip
     if ip in BLOCK_IPS:
         return jsonify({"blocked": True, "by": "ip"}), 403
 
     return jsonify({"blocked": False})
 
+# --------------------------------------------------------
 # ✅ TRACK
+# --------------------------------------------------------
 @app.route("/track", methods=["POST","OPTIONS"])
 def track():
     if request.method == "OPTIONS":
@@ -244,6 +260,7 @@ def track():
     dwell = data.get("dwell_ms") or 0
     evt_type = (data.get("type") or "").lower()
 
+    # Nunca bloquear whitelist
     if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
         data["blocked"] = False
         EVENTS.append(data)
@@ -252,15 +269,18 @@ def track():
     autoblock = False
     reason_ab = None
 
+    # regla 1: riesgo alto
     if SETTINGS["risk_autoblock"] and data["risk"]["score"] >= SETTINGS["risk_threshold"]:
         autoblock = True
         reason_ab = "risk"
 
+    # regla 2: varios WA
     if evt_type == "whatsapp_click" and repeats >= SETTINGS["repeat_required"]:
         if not had_good_dwell_recently(device_id, SETTINGS["good_dwell_window_minutes"], SETTINGS["min_good_dwell_ms"]):
             autoblock = True
             reason_ab = "wa_repeats"
 
+    # regla 3: dwell muy corto repetido
     if dwell < SETTINGS["fast_dwell_ms"] and repeats >= SETTINGS["fast_repeat_required"]:
         autoblock = True
         reason_ab = "fast_repeats"
@@ -280,7 +300,9 @@ def track():
 
     return ("", 204)
 
-# ✅ APIs
+# --------------------------------------------------------
+# ✅ APIs (events, blocklist, whitelist, settings)
+# --------------------------------------------------------
 @app.get("/api/events")
 def api_events():
     limit = int(request.args.get("limit", 200))
@@ -310,6 +332,7 @@ def get_blocklist():
         "whitelist_ips": list(WHITELIST_IPS),
     })
 
+# bloquear
 @app.post("/api/blockdevices")
 def add_block_device():
     data = request.get_json(force=True) or {}
@@ -328,6 +351,7 @@ def add_block_ip():
     BLOCK_IPS.add(ip)
     return jsonify({"ok": True, "blocked": ip})
 
+# desbloquear
 @app.delete("/api/blockdevices")
 def del_block_device():
     data = request.get_json(force=True) or {}
@@ -346,6 +370,7 @@ def del_block_ip():
         return jsonify({"ok": True, "unblocked": ip})
     return jsonify({"ok": False, "error": "ip no encontrada"}), 404
 
+# whitelist
 @app.post("/api/whitelist/devices")
 def add_whitelist_device():
     data = request.get_json(force=True) or {}
@@ -378,6 +403,8 @@ def set_settings():
     return jsonify({"ok": True, "settings": SETTINGS})
 
 
-# ✅ Run
+# --------------------------------------------------------
+# ✅ Run local
+# --------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
