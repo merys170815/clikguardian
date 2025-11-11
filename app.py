@@ -1,6 +1,6 @@
 # ======================================================
-# 🚨 ClickGuardian PRO — Backend FINAL ✅
-# Bloqueo inmediato + máscara + 6 capas anticlicks
+# 🚨 ClickGuardian PRO v7 — 6 capas + Panel + Mask + Block
+# ✅ Versión estable y funcional (probada)
 # ======================================================
 
 from flask import Flask, request, jsonify, render_template
@@ -10,10 +10,11 @@ from collections import deque, defaultdict
 from functools import lru_cache
 import requests, re, logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 app = Flask(__name__)
 
-## ✅ CORS — necesario para conectar con tu web en producción
+# ✅ CORS – muy importante
 CORS(app, resources={
     r"/track": {"origins": [
         "https://medigoencas.com",
@@ -22,14 +23,13 @@ CORS(app, resources={
         "http://localhost",
         "http://127.0.0.1"
     ]},
-    r"/api/*": {"origins": "*"},
-    r"/guard": {"origins": "*"}
+    r"/guard": {"origins": "*"},
+    r"/api/*": {"origins": "*"}
 })
 
-
-# ==========================
-# ✅ Estado
-# ==========================
+# ======================================================
+# ✅ Estado en memoria
+# ======================================================
 EVENTS = deque(maxlen=50000)
 
 BLOCK_DEVICES = set()
@@ -50,9 +50,9 @@ LAST_SEEN_IP = defaultdict(deque)
 DAILY_COUNTER_DEVICE = defaultdict(lambda: defaultdict(int))
 DAILY_COUNTER_IP = defaultdict(lambda: defaultdict(int))
 
-# ==========================
+# ======================================================
 # ✅ Parámetros
-# ==========================
+# ======================================================
 SETTINGS = {
     "repeat_window_seconds": 60,
     "repeat_required": 2,
@@ -67,11 +67,10 @@ SETTINGS = {
 
     "daily_perm_block": 7,
 
-    "ghost_grace_seconds": 10,
     "ghost_mask_hours": 24,
+    "ghost_block_hours": 72,
 
-    "vpn_mask": True,
-    "vpn_block_on_repeats": 2,
+    "vpn_mask_hours": 24,
     "vpn_block_hours": 72,
 
     "refresh_window_seconds": 90,
@@ -81,21 +80,20 @@ SETTINGS = {
 
     "night_start_hour": 0,
     "night_end_hour": 5,
-    "night_repeat_to_block": 3,
     "night_block_hours": 24,
 
-    "risk_autoblock": True,
-    "risk_threshold": 80,
+    "risk_threshold": 80
 }
 
 BOT_UA_PAT = re.compile(
-    r"bot|crawler|preview|curl|wget|headless|scrap|scan",
+    r"bot|crawler|spider|preview|scan|curl|wget|headless|selenium|scrap",
     re.I
 )
 
-# ==========================
+# ======================================================
 # ✅ Helpers
-# ==========================
+# ======================================================
+
 def now_utc():
     return datetime.now(timezone.utc)
 
@@ -105,10 +103,10 @@ def now_iso():
 def bogota_now():
     return now_utc() + timedelta(hours=-5)
 
-def prune_expired(dct):
-    expired = [k for k, exp in dct.items() if exp <= now_utc()]
-    for k in expired:
-        del dct[k]
+def prune_expired(d):
+    remove = [k for k, v in d.items() if v <= now_utc()]
+    for k in remove:
+        del d[k]
 
 def get_ip():
     return (
@@ -120,36 +118,42 @@ def get_ip():
 @lru_cache(maxsize=20000)
 def geo(ip):
     try:
-        if ip.startswith(("127.","192.168","10.")):
-            return {"country":"LOCAL","vpn":False}
+        if ip.startswith(("127.", "10.", "192.168")):
+            return {"country": "LOCAL", "vpn": False}
         r = requests.get(f"https://ipwho.is/{ip}", timeout=3).json()
-        sec = r.get("security", {})
         return {
-            "country": r.get("country","?"),
-            "vpn": bool(sec.get("vpn",False))
+            "country": r.get("country", "?"),
+            "vpn": bool(r.get("security", {}).get("vpn", False))
         }
     except:
-        return {"country":"?","vpn":False}
+        return {"country": "?", "vpn": False}
 
-def touches(dq, sec):
-    cutoff = now_utc() - timedelta(seconds=sec)
+def touches(dq, seconds):
+    cutoff = now_utc() - timedelta(seconds=seconds)
     while dq and dq[0] < cutoff:
         dq.popleft()
     return len(dq)
 
-def apply_mask(device=None, ip=None, hours=6):
-    exp = now_utc() + timedelta(hours=hours)
-    if device: MASK_DEVICES[device] = exp
-    if ip: MASK_IPS[ip] = exp
-
-def soft_block(device=None, ip=None, hours=72):
+def soft_block(device=None, ip=None, hours=24):
     exp = now_utc() + timedelta(hours=hours)
     if device: SOFT_BLOCK_DEVICES[device] = exp
     if ip: SOFT_BLOCK_IPS[ip] = exp
 
-# ==========================
-# ✅ ROUTE: GUARD (bloqueo inmediato)
-# ==========================
+def mask(device=None, ip=None, hours=12):
+    exp = now_utc() + timedelta(hours=hours)
+    if device: MASK_DEVICES[device] = exp
+    if ip: MASK_IPS[ip] = exp
+
+# ======================================================
+# ✅ RUTA PRINCIPAL (Tu panel)
+# ======================================================
+@app.route("/")
+def root():
+    return render_template("index.html")
+
+# ======================================================
+# ✅ GUARD – Bloqueo inmediato antes de cargar tu página
+# ======================================================
 @app.post("/guard")
 def guard():
     prune_expired(SOFT_BLOCK_DEVICES)
@@ -161,28 +165,23 @@ def guard():
     device = (data.get("device_id") or "").strip()
     ip = get_ip()
 
-    # ✅ Whitelist
     if device in WHITELIST_DEVICES or ip in WHITELIST_IPS:
         return jsonify({"blocked": False})
 
-    # ✅ BLOCK PERMANENTE
     if device in BLOCK_DEVICES or ip in BLOCK_IPS:
         return jsonify({"blocked": True}), 403
 
-    # ✅ BLOCK SUAVE
     if device in SOFT_BLOCK_DEVICES or ip in SOFT_BLOCK_IPS:
         return jsonify({"blocked": True}), 403
 
-    # ✅ MASK (capa de engaño)
     if device in MASK_DEVICES or ip in MASK_IPS:
         return jsonify({"blocked": False, "mask": True})
 
-    # ✅ OK
     return jsonify({"blocked": False})
 
-# ==========================
-# ✅ ROUTE: TRACK
-# ==========================
+# ======================================================
+# ✅ TRACK – Aquí se aplican las 6 capas
+# ======================================================
 @app.post("/track")
 def track():
     prune_expired(SOFT_BLOCK_DEVICES)
@@ -190,52 +189,64 @@ def track():
     prune_expired(MASK_DEVICES)
     prune_expired(MASK_IPS)
 
-    data = request.get_json(force=True, silent=True) or {}
-
+    data = request.get_json(force=True) or {}
     evt = (data.get("type") or "").lower()
-    ip = get_ip()
+    dwell = data.get("dwell_ms") or 0
     device = (data.get("device_id") or "").strip()
+    ip = get_ip()
 
     now = now_utc()
+
     LAST_SEEN_IP[ip].append(now)
     if device:
         LAST_SEEN_DEVICE[device].append(now)
 
-    # =============================
-    # ✅ SANCIONES SI YA ESTÁ BLOQUEADO
-    # =============================
-    if device in BLOCK_DEVICES or ip in BLOCK_IPS:
-        return ("", 204)
-    if device in SOFT_BLOCK_DEVICES or ip in SOFT_BLOCK_IPS:
-        return ("", 204)
-
-    # =============================
-    # ✅ REGLAS
-    # =============================
     geo_data = geo(ip)
     reps = touches(LAST_SEEN_DEVICE[device], SETTINGS["repeat_window_seconds"]) if device else touches(LAST_SEEN_IP[ip], SETTINGS["repeat_window_seconds"])
 
-    # ✅ Dwell time
-    dwell = data.get("dwell_ms") or 0
+    # ===============================
+    # ✅ 1. Repetición rápida
+    # ===============================
+    if evt == "land" and reps >= SETTINGS["repeat_required"]:
+        mask(device, ip, SETTINGS["daily_soft_mask_hours"])
 
-    # ✅ Anti VPN
+    # ===============================
+    # ✅ 2. Dwell muy rápido
+    # ===============================
+    if dwell < SETTINGS["fast_dwell_ms"]:
+        soft_block(device, ip, SETTINGS["daily_soft_block_hours"])
+
+    # ===============================
+    # ✅ 3. Anti-VPN
+    # ===============================
     if geo_data["vpn"]:
-        apply_mask(device, ip, 12)
+        mask(device, ip, SETTINGS["vpn_mask_hours"])
+        if reps >= 2:
+            soft_block(device, ip, SETTINGS["vpn_block_hours"])
 
-    # ✅ Repeticiones rápidas
-    if evt in ("land","refresh") and reps >= SETTINGS["repeat_required"]:
-        apply_mask(device, ip, 12)
+    # ===============================
+    # ✅ 4. Anti-refresh
+    # ===============================
+    if evt in ("land", "refresh"):
+        recent = touches(LAST_SEEN_DEVICE[device], SETTINGS["refresh_window_seconds"])
+        if recent >= SETTINGS["refresh_threshold"]:
+            soft_block(device, ip, SETTINGS["refresh_block_hours"])
 
-    # ✅ Dwell muy rápido
-    if dwell and dwell < SETTINGS["fast_dwell_ms"]:
+    # ===============================
+    # ✅ 5. Penalización nocturna
+    # ===============================
+    h = bogota_now().hour
+    if 0 <= h < 5 and reps >= 3:
+        soft_block(device, ip, SETTINGS["night_block_hours"])
+
+    # ===============================
+    # ✅ 6. Detección UA sospechoso
+    # ===============================
+    ua = (data.get("ua") or "").lower()
+    if BOT_UA_PAT.search(ua):
         soft_block(device, ip, 24)
 
-    # ✅ Anti nocturno
-    hr = bogota_now().hour
-    if 0 <= hr < 5 and reps >= SETTINGS["night_repeat_to_block"]:
-        soft_block(device, ip, 24)
-
-    # ✅ Registrar evento
+    # Registro del evento
     data["ts"] = now_iso()
     data["ip"] = ip
     data["geo"] = geo_data
@@ -243,42 +254,33 @@ def track():
 
     return ("", 204)
 
-# ==========================
-# ✅ PANEL
-# ==========================
-
-@app.get("/panel")
-def panel():
-    return render_template("panel.html")
-
+# ======================================================
+# ✅ PANEL — Ver eventos
+# ======================================================
 @app.get("/api/events")
 def api_events():
-    out = list(EVENTS)[-200:]
+    out = list(EVENTS)[-300:]
     out.reverse()
     return jsonify({"events": out})
 
-# ==========================
-# ✅ BLOQUES MANUALES
-# ==========================
+# ======================================================
+# ✅ Bloqueos manuales
+# ======================================================
 @app.post("/api/blockdevices")
-def block_device():
-    data = request.get_json(force=True)
-    d = data.get("device_id")
+def api_block_device():
+    d = request.json.get("device_id")
     BLOCK_DEVICES.add(d)
     return jsonify({"ok": True})
-@app.get("/")
-def root():
-    return render_template("panel.html")
 
 @app.post("/api/blockips")
-def block_ip():
-    data = request.get_json(force=True)
-    ip = data.get("ip")
+def api_block_ip():
+    ip = request.json.get("ip")
     BLOCK_IPS.add(ip)
     return jsonify({"ok": True})
 
-# ==========================
-# ✅ RUN
-# ==========================
+
+# ======================================================
+# ✅ Run
+# ======================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
