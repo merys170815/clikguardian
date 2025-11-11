@@ -70,29 +70,61 @@ async function unblockIp(ip){
 function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
-  const rowClass = isWA ? "row-whatsapp" : "";
+
+  // ✅ identificar bloqueos
   const blocked = r.blocked ? true : false;
+  const blockedBy = r.autoblocked?.by || (r.device_id && r.blocked ? "device" : (r.blocked ? "ip" : null));
 
   return `
-    <tr class="${rowClass} ${blocked ? 'row-blocked' : ''}">
+    <tr class="
+      ${isWA ? 'row-whatsapp' : ''} 
+      ${blocked ? 'row-blocked' : ''}
+    ">
       <td>${r.ts}</td>
       <td class="mono">${r.ip}</td>
-      <td>${r.geo?.city || "-"}, ${r.geo?.region || ""}<br><small>${r.geo?.isp || ""}</small></td>
+      
+      <!-- ✅ mostramos el DEVICE ID -->
+      <td class="mono" style="max-width:200px; white-space:normal;">
+        ${r.device_id || "<span style='opacity:.4'>-</span>"}
+      </td>
+
+      <td>${r.geo?.city || "-"}, ${r.geo?.region || ""}<br>
+          <small>${r.geo?.isp || ""}</small>
+      </td>
+
       <td>${translateEvent(r.type)}</td>
       <td>${r.ref || "-"}</td>
       <td>${origen(r)}</td>
+
       <td>${dwell ? dwell + " ms" : "-"}</td>
-      <td><span class="badge ${riskToLevel(r.risk?.score || 0)}">${riskToLevel(r.risk?.score || 0)}</span></td>
-      <td>${explain(r.type, dwell)}</td>
+      <td><span class="badge ${riskToLevel(r.risk?.score || 0)}">
+        ${riskToLevel(r.risk?.score || 0)}
+      </span></td>
+
+      <!-- ✅ Estado del dispositivo -->
       <td>
-        <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">Ver mapa</button>
-        ${ blocked
-          ? `<button style="margin-left:6px" onclick="unblockIp('${r.ip}')" class="map-btn">Desbloquear</button>`
-          : `<button style="margin-left:6px;background:#ef4444;color:white" onclick="blockIp('${r.ip}')" class="map-btn">Bloquear</button>`}
+        ${
+          blocked
+            ? `<strong style="color:#ef4444">Bloqueado (${blockedBy})</strong>`
+            : `<span style="color:#10b981">Activo</span>`
+        }
+      </td>
+
+      <td>
+        <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">
+          Ver mapa
+        </button>
+
+        ${
+          blocked
+            ? `<button style="margin-left:6px" onclick="unblockDevice('${r.device_id}','${r.ip}')" class="map-btn">Desbloquear</button>`
+            : `<button style="margin-left:6px;background:#ef4444;color:white" onclick="blockDevice('${r.device_id}','${r.ip}')" class="map-btn">Bloquear</button>`
+        }
       </td>
     </tr>
   `;
 }
+
 
 // ==========================
 // Cargar datos

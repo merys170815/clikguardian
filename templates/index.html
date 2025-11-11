@@ -249,20 +249,22 @@
 <div class="wrap">
   <div class="table-wrap">
     <table>
-    <thead>
+  <thead>
   <tr>
     <th>Fecha/Hora</th>
     <th>IP</th>
+    <th>Device ID</th> <!-- ✅ NUEVA COLUMNA -->
     <th>Ciudad / Región / ISP</th>
     <th>Evento</th>
     <th>Ref</th>
-    <th>Origen</th>   <!-- ✅ NUEVA COLUMNA -->
+    <th>Origen</th>
     <th>Dwell</th>
     <th>Riesgo</th>
-    <th>Explicación</th>
+    <th>Estado</th> <!-- ✅ NUEVA: Bloqueado o No -->
     <th>Acción</th>
   </tr>
 </thead>
+
 
       <tbody id="tbody"></tbody>
     </table>
@@ -285,6 +287,24 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- ✅ Huella digital del dispositivo -->
+<script src="https://openfpcdn.io/fingerprintjs/v3"></script>
+<script>
+  let DEVICE_ID = null;
+
+  async function initFingerprint() {
+    const fp = await FingerprintJS.load();
+    const result = await fp.get();
+    DEVICE_ID = result.visitorId;
+    window.DEVICE_ID = DEVICE_ID; // ✅ disponible para app.js
+  }
+
+  initFingerprint();
+</script>
+
+<!-- ✅ Tu script actual -->
 <script src="/static/app.js"></script>
 
 </body>
