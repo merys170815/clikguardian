@@ -1,5 +1,5 @@
 # ======================================================
-# ✅ ClickGuardian — versión inteligente & estable 2025
+# ✅ ClickGuardian — versión estable funcional
 # ======================================================
 
 from flask import Flask, request, jsonify, render_template
@@ -10,285 +10,349 @@ from functools import lru_cache
 import requests, re, logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
 app = Flask(__name__)
 
 # ✅ CORS
 CORS(app, resources={
-    r"/track": {"origins": "*"},
-    r"/guard": {"origins": "*"},
+    r"/track": {"origins": [
+        "https://medigoencas.com",
+        "https://www.medigoencas.com",
+        "https://clikguardian.onrender.com",
+        "http://localhost",
+        "http://127.0.0.1"
+    ]},
     r"/api/*": {"origins": "*"},
+    r"/guard": {"origins": "*"}
 })
 
 # ✅ Estado global
-EVENTS = deque(maxlen=50000)
+EVENTS = deque(maxlen=30000)
+
 BLOCK_DEVICES = set()
 BLOCK_IPS     = set()
+
 WHITELIST_DEVICES = set()
 WHITELIST_IPS     = set()
 
 LAST_SEEN_DEVICE = defaultdict(deque)
 LAST_SEEN_IP     = defaultdict(deque)
 
-BLOCKED_AT = {}   # device/ip -> datetime
-
-# ✅ Configuración inteligente
 SETTINGS = {
-    "repeat_window_seconds": 60,      # ✅ doble click en 1 minuto
-    "repeat_required": 2,             # ✅ mínimo 2 visitas en esa ventana
-    "min_good_dwell_ms": 2000,        # ✅ visita real dura más de 2s
-    "good_dwell_window_minutes": 60,  # ✅ buena visita válida por 1 hora
     "risk_autoblock": True,
     "risk_threshold": 80,
+    "repeat_window_seconds": 60,
+    "repeat_window_min": 60,
+    "repeat_required": 2,
     "fast_dwell_ms": 600,
     "fast_repeat_required": 3,
-    "autounblock_hours": 6,
-    "block_ip_after_device_blocks": 3,
+    "min_good_dwell_ms": 2000,
+    "good_dwell_window_minutes": 5
 }
 
 BOT_UA_PAT = re.compile(
-    r"bot|crawler|spider|preview|scan|curl|wget|ahrefs|semrush|monitor|pingdom",
+    r"bot|crawler|spider|preview|scan|archiver|linkchecker|monitor|pingdom|ahrefs|semrush|curl|wget",
     re.I
 )
 
-# ======================================================
-# ✅ Utilidades
-# ======================================================
-
+# ✅ Helpers
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 def get_client_ip():
     h = request.headers
-    for key in ("CF-Connecting-IP", "True-Client-IP", "X-Real-IP"):
-        if key in h:
-            return h[key]
-    if "X-Forwarded-For" in h:
-        return h["X-Forwarded-For"].split(",")[0]
+    for k in ("CF-Connecting-IP","True-Client-IP","X-Real-IP"):
+        v = h.get(k)
+        if v:
+            return v.strip()
+    xff = h.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
     return request.remote_addr
 
 @lru_cache(maxsize=20000)
-def geo_lookup(ip):
+def geo_lookup(ip: str):
     try:
         if not ip or ip.startswith(("127.","10.","192.168.","::1")):
-            return {"country":"LOCAL","vpn":False}
+            return {"country":"LOCAL","region":"-","city":"-","district":"-","isp":"LAN",
+                    "asn":"-","lat":0,"lon":0,"vpn":False}
         r = requests.get(f"https://ipwho.is/{ip}", timeout=3)
-        j = r.json()
+        j = r.json() if r.ok else {}
+        conn = j.get("connection",{}) or {}
         sec = j.get("security",{}) or {}
-        return {"country": j.get("country"), "vpn": sec.get("vpn",False)}
-    except:
-        return {"country": "-", "vpn": False}
 
-def prune_old(dq, cutoff):
+        return {
+            "country": j.get("country","-"),
+            "region":  j.get("region","-"),
+            "city":    j.get("city","-"),
+            "district":j.get("district","-"),
+            "isp":     conn.get("isp") or j.get("org","-"),
+            "asn":     conn.get("asn","-"),
+            "lat":     j.get("latitude",0),
+            "lon":     j.get("longitude",0),
+            "vpn":     bool(sec.get("vpn",False))
+        }
+
+    except Exception:
+        return {"country":"-","region":"-","city":"-","district":"-","isp":"-",
+                "asn":"-","lat":0,"lon":0,"vpn":False}
+
+def _prune_window(dq: deque, cutoff: datetime):
     while dq and dq[0] < cutoff:
         dq.popleft()
 
-def recent_touches(dq, seconds):
+def count_recent(dq: deque, seconds: int) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
-    prune_old(dq, cutoff)
+    _prune_window(dq, cutoff)
     return len(dq)
 
-def had_good_dwell_recent(device_or_ip, minutes, min_ms):
+def touches_in_window_device(device_id: str, seconds: int):
+    return count_recent(LAST_SEEN_DEVICE[device_id], seconds)
+
+def touches_in_window_ip(ip: str, seconds: int):
+    return count_recent(LAST_SEEN_IP[ip], seconds)
+
+def had_good_dwell_recently(device_id: str, minutes: int, min_ms: int) -> bool:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+
     for ev in reversed(EVENTS):
-        if ev.get("device_id") != device_or_ip and ev.get("ip") != device_or_ip:
+        if ev.get("device_id") != device_id:
             continue
         try:
-            ts = datetime.fromisoformat(ev["ts"])
-        except:
+            ev_ts = datetime.fromisoformat(ev.get("ts"))
+        except Exception:
             continue
-        if ts < cutoff:
+        if ev_ts < cutoff:
             break
-        if ev["type"] == "land" and (ev.get("dwell_ms") or 0) >= min_ms:
+        if ev.get("type") == "land" and (ev.get("dwell_ms") or 0) >= min_ms:
             return True
+
     return False
 
-def had_recent_whatsapp(device_or_ip, seconds):
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
-    for ev in reversed(EVENTS):
-        if ev.get("device_id") != device_or_ip and ev.get("ip") != device_or_ip:
-            continue
-        try:
-            ts = datetime.fromisoformat(ev["ts"])
-        except:
-            continue
-        if ts < cutoff:
-            break
-        if (ev.get("type") or "").lower() == "whatsapp_click":
-            return True
-    return False
-
-def compute_risk(ev):
+def compute_risk(ev: dict):
     score = 0
+    reasons = []
+
+    evt_type = (ev.get("type") or "").lower()
+    dwell = ev.get("dwell_ms") or 0
+
+    if dwell and dwell < 800:
+        score += 30
+        reasons.append("Dwell < 800ms")
+
     ua = (ev.get("ua") or "").lower()
     if BOT_UA_PAT.search(ua):
-        score += 30
-    if ev.get("geo",{}).get("vpn"):
+        score += 25
+        reasons.append("UA sospechosa")
+
+    ref = (ev.get("ref") or "")
+    url = (ev.get("url") or "")
+    if ("google" in ref or "gclid=" in url) and "gclid=" not in url:
+        score += 25
+        reasons.append("Ads ref sin gclid")
+
+    geo = ev.get("geo") or {}
+    if geo.get("country") not in ("LOCAL","Colombia","CO",None):
+        score += 10
+        reasons.append("País ≠ CO")
+
+    if geo.get("vpn"):
         score += 15
-    return min(score, 100)
+        reasons.append("VPN detectada")
 
+    if evt_type == "whatsapp_click":
+        score = max(0, score - 30)
+        reasons.append("Click en WhatsApp (mitiga)")
 
-# ======================================================
-# ✅ FRONT RENDER
-# ======================================================
+    score = max(0, min(100, score))
 
+    return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
+
+# ✅ UI
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
-# ======================================================
-# ✅ GUARD — usado por tu JS para saber si bloquear
-# ======================================================
-
+# ✅ GUARD API
 @app.post("/guard")
 def guard():
     data = request.get_json(force=True, silent=True) or {}
-    device_id = data.get("device_id")
+    device_id = (data.get("device_id") or "").strip()
     ip = get_client_ip()
 
-    # Whitelist
-    if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
-        return jsonify({"blocked": False})
+    if device_id in WHITELIST_DEVICES:
+        return jsonify({"blocked": False, "by": "whitelist"})
 
-    # Bloqueado
-    if device_id in BLOCK_DEVICES or ip in BLOCK_IPS:
-        return jsonify({"blocked": True}), 403
+    if ip in WHITELIST_IPS:
+        return jsonify({"blocked": False, "by": "whitelist"})
+
+    if device_id and device_id in BLOCK_DEVICES:
+        return jsonify({"blocked": True, "by": "device"}), 403
+
+    if ip in BLOCK_IPS:
+        return jsonify({"blocked": True, "by": "ip"}), 403
 
     return jsonify({"blocked": False})
 
-
-# ======================================================
-# ✅ TRACK — corazón del sistema
-# ======================================================
-
-@app.post("/track")
+# ✅ TRACK
+@app.route("/track", methods=["POST","OPTIONS"])
 def track():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json(force=True, silent=True) or {}
 
     ip = get_client_ip()
-    device = data.get("device_id") or None
-    evt_type = (data.get("type") or "land").lower()
+    device_id = (data.get("device_id") or "").strip() or None
+
     now = datetime.now(timezone.utc)
-    dwell = data.get("dwell_ms") or 0
-
-    # Registrar times
     LAST_SEEN_IP[ip].append(now)
-    if device:
-        LAST_SEEN_DEVICE[device].append(now)
+    if device_id:
+        LAST_SEEN_DEVICE[device_id].append(now)
 
-    # Construir evento
-    event = {
-        "ip": ip,
-        "device_id": device,
-        "ts": now_iso(),
-        "type": evt_type,
-        "url": data.get("url"),
-        "ref": data.get("ref"),
-        "ua": data.get("ua"),
-        "dwell_ms": dwell,
-        "geo": geo_lookup(ip),
-    }
+    data["ip"] = ip
+    data["device_id"] = device_id
+    data["ts"] = now_iso()
+    data["geo"] = geo_lookup(ip)
+    data["risk"] = compute_risk(data)
 
-    # ✅ Desbloqueo automático
-    if SETTINGS["autounblock_hours"] > 0:
-        cutoff = now - timedelta(hours=SETTINGS["autounblock_hours"])
-        for k, t in list(BLOCKED_AT.items()):
-            if t < cutoff:
-                BLOCK_IPS.discard(k)
-                BLOCK_DEVICES.discard(k)
-                BLOCKED_AT.pop(k, None)
+    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+    dwell = data.get("dwell_ms") or 0
+    evt_type = (data.get("type") or "").lower()
 
-    # ✅ Si ya está bloqueado → registrar y responder
-    if device in BLOCK_DEVICES or ip in BLOCK_IPS:
-        event["blocked"] = True
-        EVENTS.append(event)
-        return ("", 403)
-
-    # ✅ Whitelist
-    if device in WHITELIST_DEVICES or ip in WHITELIST_IPS:
-        event["blocked"] = False
-        EVENTS.append(event)
+    if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
+        data["blocked"] = False
+        EVENTS.append(data)
         return ("", 204)
 
-    # ==================================================
-    # ✅ LÓGICA PRINCIPAL QUE ME PEDISTE
-    # ==================================================
-
-    # 1) Contar repeticiones
-    if device:
-        repeats = recent_touches(LAST_SEEN_DEVICE[device], SETTINGS["repeat_window_seconds"])
-    else:
-        repeats = recent_touches(LAST_SEEN_IP[ip], SETTINGS["repeat_window_seconds"])
-
-    # 2) Ver si hay WhatsApp en la ventana
-    wa_recent = had_recent_whatsapp(device or ip, SETTINGS["repeat_window_seconds"])
-
-    # 3) Ver si hubo visita buena en 1 hora
-    good_visit = had_good_dwell_recent(device or ip, SETTINGS["good_dwell_window_minutes"],
-                                       SETTINGS["min_good_dwell_ms"])
-
     autoblock = False
-    reason = None
+    reason_ab = None
 
-    # ✅ Si NO hay WhatsApp, NO hay buena visita y sí hay repeticiones → bloquear
-    if evt_type == "land" and repeats >= SETTINGS["repeat_required"] and not wa_recent and not good_visit:
+    if SETTINGS["risk_autoblock"] and data["risk"]["score"] >= SETTINGS["risk_threshold"]:
         autoblock = True
-        reason = "double_click_no_good_visit"
+        reason_ab = "risk"
 
-    # ✅ Si dwell es demasiado bajo y repite mucho → sospechoso
+    if evt_type == "whatsapp_click" and repeats >= SETTINGS["repeat_required"]:
+        if not had_good_dwell_recently(device_id, SETTINGS["good_dwell_window_minutes"], SETTINGS["min_good_dwell_ms"]):
+            autoblock = True
+            reason_ab = "wa_repeats"
+
     if dwell < SETTINGS["fast_dwell_ms"] and repeats >= SETTINGS["fast_repeat_required"]:
         autoblock = True
-        reason = reason or "fast_repeats"
-
-    # ✅ Riesgo alto (bots evidentes)
-    risk_score = compute_risk(event)
-    if SETTINGS["risk_autoblock"] and risk_score >= SETTINGS["risk_threshold"]:
-        autoblock = True
-        reason = reason or "risk_high"
-
-    # ==================================================
-    # ✅ Aplicar bloqueo si corresponde
-    # ==================================================
+        reason_ab = "fast_repeats"
 
     if autoblock:
-        if device:
-            BLOCK_DEVICES.add(device)
-            BLOCKED_AT[device] = now
-            event["autoblocked"] = {"by": "device", "reason": reason}
+        if device_id:
+            BLOCK_DEVICES.add(device_id)
+            data["autoblocked"] = {"by": "device", "reason": reason_ab}
         else:
             BLOCK_IPS.add(ip)
-            BLOCKED_AT[ip] = now
-            event["autoblocked"] = {"by": "ip", "reason": reason}
+            data["autoblocked"] = {"by": "ip", "reason": reason_ab}
     else:
-        event["autoblocked"] = False
+        data["autoblocked"] = False
 
-    event["blocked"] = autoblock
-    EVENTS.append(event)
+    data["blocked"] = (device_id in BLOCK_DEVICES) or (ip in BLOCK_IPS)
+    EVENTS.append(data)
 
     return ("", 204)
 
-
-# ======================================================
-# ✅ API DE CONSULTAS
-# ======================================================
-
+# ✅ APIs
 @app.get("/api/events")
 def api_events():
-    return jsonify({"events": list(reversed(EVENTS))[:300]})
+    limit = int(request.args.get("limit", 200))
+    evs = list(EVENTS)[-limit:]
+    evs.reverse()
 
+    out = []
+    for ev in evs:
+        device_id = ev.get("device_id")
+        ip = ev.get("ip")
+        blocked_device = device_id in BLOCK_DEVICES if device_id else False
+        blocked_ip = ip in BLOCK_IPS
+        out.append({
+            **ev,
+            "blocked_now": blocked_device or blocked_ip,
+            "blocked_by": "device" if blocked_device else ("ip" if blocked_ip else None)
+        })
+
+    return jsonify({"events": out})
 
 @app.get("/api/blocklist")
-def blocklist():
+def get_blocklist():
     return jsonify({
         "devices": list(BLOCK_DEVICES),
         "ips": list(BLOCK_IPS),
+        "whitelist_devices": list(WHITELIST_DEVICES),
+        "whitelist_ips": list(WHITELIST_IPS),
     })
 
+@app.post("/api/blockdevices")
+def add_block_device():
+    data = request.get_json(force=True) or {}
+    d = (data.get("device_id") or "").strip()
+    if not d:
+        return jsonify({"ok": False, "error": "device_id requerido"}), 400
+    BLOCK_DEVICES.add(d)
+    return jsonify({"ok": True, "blocked": d})
 
-# ======================================================
+@app.post("/api/blockips")
+def add_block_ip():
+    data = request.get_json(force=True) or {}
+    ip = (data.get("ip") or "").strip()
+    if not ip:
+        return jsonify({"ok": False, "error": "ip requerida"}), 400
+    BLOCK_IPS.add(ip)
+    return jsonify({"ok": True, "blocked": ip})
+
+@app.delete("/api/blockdevices")
+def del_block_device():
+    data = request.get_json(force=True) or {}
+    d = (data.get("device_id") or "").strip()
+    if d in BLOCK_DEVICES:
+        BLOCK_DEVICES.remove(d)
+        return jsonify({"ok": True, "unblocked": d})
+    return jsonify({"ok": False, "error": "device_id no encontrado"}), 404
+
+@app.delete("/api/blockips")
+def del_block_ip():
+    data = request.get_json(force=True) or {}
+    ip = (data.get("ip") or "").strip()
+    if ip in BLOCK_IPS:
+        BLOCK_IPS.remove(ip)
+        return jsonify({"ok": True, "unblocked": ip})
+    return jsonify({"ok": False, "error": "ip no encontrada"}), 404
+
+@app.post("/api/whitelist/devices")
+def add_whitelist_device():
+    data = request.get_json(force=True) or {}
+    d = (data.get("device_id") or "").strip()
+    if not d:
+        return jsonify({"ok": False, "error": "device_id requerido"}), 400
+    WHITELIST_DEVICES.add(d)
+    return jsonify({"ok": True, "added": d})
+
+@app.delete("/api/whitelist/devices")
+def del_whitelist_device():
+    data = request.get_json(force=True) or {}
+    d = (data.get("device_id") or "").strip()
+    if d in WHITELIST_DEVICES:
+        WHITELIST_DEVICES.remove(d)
+        return jsonify({"ok": True, "removed": d})
+    return jsonify({"ok": False, "error": "device_id no encontrado"}), 404
+
+@app.get("/api/settings")
+def get_settings():
+    return jsonify(SETTINGS)
+
+@app.post("/api/settings")
+def set_settings():
+    data = request.get_json(force=True) or {}
+    allowed = SETTINGS.keys()
+    for k in allowed:
+        if k in data:
+            SETTINGS[k] = data[k]
+    return jsonify({"ok": True, "settings": SETTINGS})
+
+
 # ✅ Run
-# ======================================================
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
