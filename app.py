@@ -246,6 +246,11 @@ def track():
 # ==========================
 # ✅ PANEL
 # ==========================
+
+@app.get("/panel")
+def panel():
+    return render_template("panel.html")
+
 @app.get("/api/events")
 def api_events():
     out = list(EVENTS)[-200:]
