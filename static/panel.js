@@ -109,20 +109,24 @@ function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
-  // 🔴 estado EN VIVO (calculado por el backend)
+  // ✅ estado EN VIVO calculado por backend
   const blockedNow = !!r.blocked_now;
   const blockedBy  = r.blocked_by || (r.device_id && r.blocked ? "device" : (r.blocked ? "ip" : null));
 
-  // ¿Qué acción usar?
   const hasDevice = !!r.device_id;
-  const blockCall   = hasDevice ? `blockDevice('${r.device_id}')`   : `blockIp('${r.ip}')`;
-  const unblockCall = hasDevice ? `unblockDevice('${r.device_id}')` : `unblockIp('${r.ip}')`;
+
+  // ✅ Bloquear / desbloquear inmediato
+  const blockCall   = hasDevice ? `blockDevice('${r.device_id}')`
+                                : `blockIp('${r.ip}')`;
+
+  const unblockCall = hasDevice ? `unblockDevice('${r.device_id}')`
+                                : `unblockIp('${r.ip}')`;
 
   return `
     <tr class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
       <td>${r.ts}</td>
-      <td class="mono">${r.ip || '-'}</td>
-      <td class="mono" style="max-width:220px;white-space:normal;">${r.device_id || "<span style='opacity:.4'>-</span>"}</td>
+      <td>${r.ip || '-'}</td>
+      <td>${r.device_id || "<span style='opacity:.4'>-</span>"}</td>
       <td>${r.geo?.city || "-"}, ${r.geo?.region || ""}<br><small>${r.geo?.isp || ""}</small></td>
       <td>${translateEvent(r.type)}</td>
       <td>${r.ref || "-"}</td>
@@ -136,9 +140,10 @@ function renderRow(r) {
       </td>
       <td>
         <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">Ver mapa</button>
+
         ${blockedNow
-          ? `<button style="margin-left:6px" onclick="${unblockCall}" class="map-btn">Desbloquear</button>`
-          : `<button style="margin-left:6px;background:#ef4444;color:white" onclick="${blockCall}" class="map-btn">Bloquear</button>`}
+          ? `<button style="margin-left:6px" onclick="${unblockCall}">Desbloquear</button>`
+          : `<button style="margin-left:6px;background:#ef4444;color:white" onclick="${blockCall}">Bloquear</button>`}
       </td>
     </tr>
   `;
