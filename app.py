@@ -150,6 +150,9 @@ def compute_risk(ev: dict) -> dict:
     score = max(0, min(100, score))
     return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
 
+@app.route("/")
+def home():
+    return render_template("index.html")
 
 @app.route("/track", methods=["POST","OPTIONS"])
 def track():
