@@ -3,7 +3,9 @@ from flask_cors import CORS
 from datetime import datetime, timezone, timedelta
 from collections import deque, defaultdict
 from functools import lru_cache
-import requests, re
+import requests, re, logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = Flask(__name__)
 
@@ -12,21 +14,24 @@ CORS(app, resources={
     r"/track": {"origins": [
         "https://medigoencas.com",
         "https://www.medigoencas.com",
-        "https://clikguardian.onrender.com",   # si simulas desde el panel
+        "https://clikguardian.onrender.com",
         "http://localhost:3000", "http://127.0.0.1:3000",
         "http://localhost", "http://127.0.0.1"
     ]},
-    r"/api/*": {"origins": "*"}  # el panel puede leer desde cualquier origen
+    r"/api/*": {"origins": "*"}
 })
 
-EVENTS = deque(maxlen=8000)
+EVENTS = deque(maxlen=16000)
 BLOCK  = set()
 LAST_SEEN = defaultdict(deque)
 
 SETTINGS = {
     "risk_autoblock": True,
     "risk_threshold": 80,
-    "repeat_window_min": 60,
+    "repeat_window_min": 60,   # ventana en minutos para conteo rápido (se usa también en ui)
+    "repeat_window_seconds": 60,  # ventana para rule específica (segundos)
+    "repeat_required": 2,      # cuantos clicks para autobloquear (2 según tu pedido)
+    "max_dwell_ms": 60000      # dwell máximo por visita (60s)
 }
 
 BOT_UA_PAT = re.compile(
@@ -71,6 +76,23 @@ def geo_lookup(ip: str):
         return {"country":"-","region":"-","city":"-","district":"-",
                 "isp":"-","asn":"-","lat":0,"lon":0,"vpn":False}
 
+def recent_events_for_ip(ip: str, seconds: int):
+    """Devuelve eventos recientes para ip en los últimos `seconds` segundos (buscar en EVENTS)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    res = []
+    # iterar al revés es más eficiente: eventos recientes primero
+    for ev in reversed(EVENTS):
+        try:
+            ev_ts = datetime.fromisoformat(ev.get("ts"))
+        except Exception:
+            continue
+        if ev.get("ip") != ip:
+            continue
+        if ev_ts < cutoff:
+            break
+        res.append(ev)
+    return res
+
 def count_recent_clicks(ip: str, minutes: int) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     dq = LAST_SEEN[ip]
@@ -84,38 +106,50 @@ def compute_risk(ev: dict) -> dict:
 
     dwell = ev.get("dwell_ms") or 0
     if dwell and dwell < 800:
-        score += 30; reasons.append("Dwell < 800ms")
+        score += 30
+        reasons.append("Dwell < 800ms")
 
+    # User-Agent sospechoso
     ua = (ev.get("ua") or "").lower()
     if BOT_UA_PAT.search(ua):
-        score += 25; reasons.append("User-Agent tipo bot")
+        score += 25
+        reasons.append("User-Agent tipo bot")
 
-    ref = (ev.get("ref") or ""); url = (ev.get("url") or "")
+    ref = (ev.get("ref") or "")
+    url = (ev.get("url") or "")
     if ("google" in ref or "gclid=" in url) and "gclid=" not in url:
-        score += 25; reasons.append("Ads ref sin gclid")
+        score += 25
+        reasons.append("Ads ref sin gclid")
 
     ip = ev.get("ip") or ""
     repeats = count_recent_clicks(ip, SETTINGS["repeat_window_min"])
-    if repeats >= 3:
-        score += 20; reasons.append(f"Repeticiones en {SETTINGS['repeat_window_min']}min: {repeats}")
+
+    # ✅ NUEVA REGLA: 2 clics en 1 minuto → bloquéalo
+    if repeats >= 2:
+        score += 40
+        reasons.append("2+ clics en menos de 1 minuto")
+
+    # ✅ NUEVA REGLA: visitas ultra rápidas repetidas
+    if dwell < 600 and repeats >= 3:
+        score += 35
+        reasons.append("Visitas repetidas con dwell muy bajo (<600ms)")
 
     geo = ev.get("geo") or {}
     if geo.get("country") and geo["country"] not in ("LOCAL","Colombia","CO"):
-        score += 10; reasons.append(f"País ≠ CO ({geo.get('country')})")
+        score += 10
+        reasons.append(f"País ≠ CO ({geo.get('country')})")
     if geo.get("vpn"):
-        score += 15; reasons.append("VPN/Hosting detectado")
+        score += 15
+        reasons.append("VPN/Hosting detectado")
 
-    # Si es click de WhatsApp confirmado, no penalices por dwell bajo.
+    # ✅ WhatsApp click debe bajar el riesgo
     if evt_type == "whatsapp_click":
-        reasons.append("WhatsApp click confirmado")
         score = max(0, score - 30)
+        reasons.append("Click real en WhatsApp")
 
     score = max(0, min(100, score))
     return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
 
-@app.route("/")
-def home():
-    return render_template("index.html")
 
 @app.route("/track", methods=["POST","OPTIONS"])
 def track():
@@ -123,6 +157,7 @@ def track():
         return ("", 204)
 
     data = request.get_json(force=True, silent=True) or {}
+
     ip = get_client_ip()
     LAST_SEEN[ip].append(datetime.now(timezone.utc))
 
@@ -132,7 +167,26 @@ def track():
     data["geo"] = geo_lookup(ip)
     data["risk"] = compute_risk(data)
 
-    if SETTINGS["risk_autoblock"] and data["risk"]["suspicious"]:
+    # ✅ AUTOBLOQUEO REAL AQUÍ
+    risk = data["risk"]["score"]
+    repeats = count_recent_clicks(ip, 1)  # último minuto
+    dwell = data.get("dwell_ms") or 0
+
+    autoblock = False
+
+    # Regla 1: score ≥ 80
+    if risk >= 80:
+        autoblock = True
+
+    # Regla 2: 2+ clics en 1 minuto
+    if repeats >= 2:
+        autoblock = True
+
+    # Regla 3: 3+ visitas rápidas (<600ms)
+    if dwell < 600 and repeats >= 3:
+        autoblock = True
+
+    if autoblock:
         BLOCK.add(ip)
         data["autoblocked"] = True
     else:
@@ -150,7 +204,15 @@ def api_events():
 
 @app.get("/api/blocklist")
 def get_blocklist():
-    return jsonify(sorted(list(BLOCK)))
+    # devolver adicionalmente el número de veces visto recientemente
+    out = []
+    for ip in sorted(BLOCK):
+        out.append({
+            "ip": ip,
+            "last_seen_count": count_recent_clicks(ip, SETTINGS["repeat_window_min"]),
+            "sample_geo": geo_lookup(ip)
+        })
+    return jsonify(out)
 
 @app.post("/api/blocklist")
 def add_block():
@@ -158,6 +220,7 @@ def add_block():
     ip = data.get("ip")
     if ip:
         BLOCK.add(ip)
+        logging.info(f"Manual block added: {ip}")
     return jsonify({"ok": True, "size": len(BLOCK)})
 
 @app.delete("/api/blocklist")
@@ -166,6 +229,7 @@ def del_block():
     ip = data.get("ip")
     if ip and ip in BLOCK:
         BLOCK.remove(ip)
+        logging.info(f"Manual unblock: {ip}")
     return jsonify({"ok": True, "size": len(BLOCK)})
 
 @app.get("/api/settings")
@@ -175,7 +239,7 @@ def get_settings():
 @app.post("/api/settings")
 def set_settings():
     data = request.get_json(force=True) or {}
-    for k in ("risk_autoblock","risk_threshold","repeat_window_min"):
+    for k in ("risk_autoblock","risk_threshold","repeat_window_min","repeat_window_seconds","repeat_required","max_dwell_ms"):
         if k in data:
             SETTINGS[k] = data[k]
     return jsonify({"ok": True, "settings": SETTINGS})
