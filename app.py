@@ -9,11 +9,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 app = Flask(__name__)
 
-# CORS
+# CORS CORREGIDO
 CORS(app, resources={
     r"/track": {"origins": [
-        "https://medigoencas.com",
-        "https://www.medigoencas.com",
+        "https://medigoencasa.com",
+        "https://www.medigoencasa.com",
         "https://clikguardian.onrender.com",
         "http://localhost",
         "http://127.0.0.1"
