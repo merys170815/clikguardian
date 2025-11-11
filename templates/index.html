@@ -298,14 +298,15 @@
     const fp = await FingerprintJS.load();
     const result = await fp.get();
     DEVICE_ID = result.visitorId;
-    window.DEVICE_ID = DEVICE_ID; // ✅ disponible para app.js
+    window.DEVICE_ID = DEVICE_ID; // ✅ disponible para panel.js
   }
 
   initFingerprint();
 </script>
 
 <!-- ✅ Tu script actual -->
-<script src="/static/app.js"></script>
+<script src="/static/panel.js?v=4"></script>
+
 
 </body>
 </html>
