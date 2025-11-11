@@ -268,7 +268,7 @@ def block_device():
     return jsonify({"ok": True})
 @app.get("/")
 def root():
-    return "<h1>✅ ClickGuardian corriendo</h1>"
+    return render_template("panel.html")
 
 @app.post("/api/blockips")
 def block_ip():
