@@ -80,6 +80,36 @@
       background:#32405a;
     }
 
+    /* MENÚ DE COLUMNAS */
+    #columnsBtn {
+      background:#32405a;
+      border:1px solid #3a4b63;
+    }
+
+    .cols-menu {
+      position:absolute;
+      top:115px;
+      left:350px;
+      background:#111827;
+      border:1px solid #1e2637;
+      border-radius:6px;
+      padding:12px;
+      display:none;
+      flex-direction:column;
+      gap:8px;
+      z-index:2000;
+      width:200px;
+    }
+
+    .cols-menu label {
+      font-size:13px;
+      color:#d5d8dd;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      cursor:pointer;
+    }
+
     /* CONTENIDO SCROLLEABLE */
     .wrap{
       position:absolute;
@@ -112,7 +142,6 @@
       color:#dbe2ee;
     }
 
-    /* CABECERA FIJA */
     thead th{
       position:sticky;
       top:0;
@@ -122,7 +151,6 @@
       border-bottom:2px solid #1f2e45;
     }
 
-    /* COLORES DE RIESGO */
     .badge{
       padding:4px 8px;
       border-radius:20px;
@@ -158,7 +186,6 @@
       background:#059669;
     }
 
-    /* MODAL MAPA */
     .modal{
       display:none;
       position:fixed;
@@ -201,28 +228,20 @@
       font-weight:600;
     }
 
-    /* ✅ Fila especial para clics a WhatsApp */
-.row-whatsapp {
-  background-color: rgba(37, 211, 102, 0.12); /* verde WhatsApp suave */
-}
+    .row-whatsapp {
+      background-color: rgba(37, 211, 102, 0.12);
+    }
+    .row-whatsapp:hover {
+      background-color: rgba(37, 211, 102, 0.22);
+    }
 
-.row-whatsapp:hover {
-  background-color: rgba(37, 211, 102, 0.22);
-}
+    .row-blocked {
+      background-color: rgba(239, 68, 68, 0.15) !important;
+    }
 
-/* ✅ Fila marcada como bloqueada */
-.row-blocked {
-  background-color: rgba(239, 68, 68, 0.15) !important; /* rojo suave */
-}
-
-.row-blocked:hover {
-  background-color: rgba(239, 68, 68, 0.25) !important;
-}
-
-.row-blocked td {
-  color: #ffe8e8 !important;
-  font-weight: 600;
-}
+    .row-blocked:hover {
+      background-color: rgba(239, 68, 68, 0.25) !important;
+    }
 
   </style>
 </head>
@@ -242,6 +261,24 @@
   </label>
 
   <button id="refresh">Actualizar</button>
+
+  <!-- ✔ NUEVO botón columnas -->
+  <button id="columnsBtn">Columnas ▾</button>
+
+  <!-- ✔ MENÚ DE COLUMNAS -->
+  <div id="columnsMenu" class="cols-menu">
+    <label><input type="checkbox" data-col="0" checked> Fecha/Hora</label>
+    <label><input type="checkbox" data-col="1" checked> IP</label>
+    <label><input type="checkbox" data-col="2" checked> Device ID</label>
+    <label><input type="checkbox" data-col="3" checked> Ciudad / Región / ISP</label>
+    <label><input type="checkbox" data-col="4" checked> Evento</label>
+    <label><input type="checkbox" data-col="5"> Ref</label>
+    <label><input type="checkbox" data-col="6"> Origen</label>
+    <label><input type="checkbox" data-col="7" checked> Dwell</label>
+    <label><input type="checkbox" data-col="8" checked> Riesgo</label>
+    <label><input type="checkbox" data-col="9" checked> Estado</label>
+    <label><input type="checkbox" data-col="10" checked> Acción</label>
+  </div>
 
   <div style="margin-left:auto; color:var(--muted);" id="kpiSummary"></div>
 </div>
@@ -286,10 +323,8 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- ✅ Huella digital del dispositivo -->
 <script src="https://openfpcdn.io/fingerprintjs/v3"></script>
+
 <script>
   let DEVICE_ID = null;
 
@@ -297,16 +332,37 @@
     const fp = await FingerprintJS.load();
     const result = await fp.get();
     DEVICE_ID = result.visitorId;
-    window.DEVICE_ID = DEVICE_ID; // ✅ disponible para panel.js
+    window.DEVICE_ID = DEVICE_ID;
   }
 
   initFingerprint();
 </script>
 
-<!-- ✅ Tu script actual -->
+<!-- PANEL JS (tu script de backend) -->
 <script src="/static/panel.js?v=5"></script>
 
+<!-- ✔ SCRIPT PARA OCULTAR COLUMNAS -->
+<script>
+document.getElementById("columnsBtn").addEventListener("click", () => {
+  const menu = document.getElementById("columnsMenu");
+  menu.style.display = (menu.style.display === "flex") ? "none" : "flex";
+});
 
+document.querySelectorAll('#columnsMenu input[type="checkbox"]').forEach(cb => {
+  cb.addEventListener("change", () => {
+    const colIndex = cb.dataset.col;
+    const show = cb.checked;
+
+    // Mostrar/ocultar TH
+    document.querySelectorAll("table th")[colIndex].style.display = show ? "" : "none";
+
+    // Mostrar/ocultar TD
+    document.querySelectorAll("table tbody tr").forEach(tr => {
+      tr.children[colIndex].style.display = show ? "" : "none";
+    });
+  });
+});
+</script>
 
 </body>
 </html>

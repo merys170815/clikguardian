@@ -9,6 +9,54 @@ from collections import deque, defaultdict
 from functools import lru_cache
 import requests, re, logging
 
+import json, os
+
+STORAGE_FILE = "storage.json"
+
+def load_storage():
+    if not os.path.exists(STORAGE_FILE):
+        return
+
+    try:
+        with open(STORAGE_FILE, "r") as f:
+            data = json.load(f)
+
+        # Restaurar todo
+        BLOCK_DEVICES.update(data.get("block_devices", []))
+        BLOCK_IPS.update(data.get("block_ips", []))
+        WHITELIST_DEVICES.update(data.get("whitelist_devices", []))
+        WHITELIST_IPS.update(data.get("whitelist_ips", []))
+
+        # Restauramos settings si existen
+        saved_settings = data.get("settings", {})
+        for k, v in saved_settings.items():
+            if k in SETTINGS:
+                SETTINGS[k] = v
+
+        logging.info("🔄 Storage cargado exitosamente")
+
+    except Exception as e:
+        logging.error(f"❌ Error cargando storage: {e}")
+
+
+def save_storage():
+    try:
+        data = {
+            "block_devices": list(BLOCK_DEVICES),
+            "block_ips": list(BLOCK_IPS),
+            "whitelist_devices": list(WHITELIST_DEVICES),
+            "whitelist_ips": list(WHITELIST_IPS),
+            "settings": SETTINGS
+        }
+        with open(STORAGE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+
+        logging.info("💾 Storage guardado exitosamente")
+
+    except Exception as e:
+        logging.error(f"❌ Error guardando storage: {e}")
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 app = Flask(__name__)
 
@@ -292,7 +340,9 @@ def add_block_device():
     if not d:
         return jsonify({"ok": False, "error": "device_id requerido"}), 400
     BLOCK_DEVICES.add(d)
+    save_storage()
     return jsonify({"ok": True, "blocked": d})
+
 
 @app.post("/api/blockips")
 def add_block_ip():
@@ -301,7 +351,9 @@ def add_block_ip():
     if not ip:
         return jsonify({"ok": False, "error": "ip requerida"}), 400
     BLOCK_IPS.add(ip)
+    save_storage()
     return jsonify({"ok": True, "blocked": ip})
+
 
 @app.delete("/api/blockdevices")
 def del_block_device():
@@ -309,8 +361,9 @@ def del_block_device():
     d = (data.get("device_id") or "").strip()
     if d in BLOCK_DEVICES:
         BLOCK_DEVICES.remove(d)
+        save_storage()
         return jsonify({"ok": True, "unblocked": d})
-    return jsonify({"ok": False, "error": "device_id no encontrado"}), 404
+
 
 @app.delete("/api/blockips")
 def del_block_ip():
@@ -318,26 +371,21 @@ def del_block_ip():
     ip = (data.get("ip") or "").strip()
     if ip in BLOCK_IPS:
         BLOCK_IPS.remove(ip)
+        save_storage()
         return jsonify({"ok": True, "unblocked": ip})
-    return jsonify({"ok": False, "error": "ip no encontrada"}), 404
-
-@app.post("/api/whitelist/devices")
-def add_whitelist_device():
-    data = request.get_json(force=True) or {}
-    d = (data.get("device_id") or "").strip()
-    if not d:
-        return jsonify({"ok": False, "error": "device_id requerido"}), 400
-    WHITELIST_DEVICES.add(d)
-    return jsonify({"ok": True, "added": d})
 
 @app.delete("/api/whitelist/devices")
-def del_whitelist_device():
+def delete_whitelist_device():
     data = request.get_json(force=True) or {}
     d = (data.get("device_id") or "").strip()
+
     if d in WHITELIST_DEVICES:
         WHITELIST_DEVICES.remove(d)
+        save_storage()
         return jsonify({"ok": True, "removed": d})
+
     return jsonify({"ok": False, "error": "device_id no encontrado"}), 404
+
 
 @app.get("/api/settings")
 def get_settings():
@@ -350,8 +398,12 @@ def set_settings():
     for k in allowed:
         if k in data:
             SETTINGS[k] = data[k]
+    save_storage()
     return jsonify({"ok": True, "settings": SETTINGS})
 
+
+# Cargar memoria persistente
+load_storage()
 
 # ✅ Run
 if __name__ == "__main__":
