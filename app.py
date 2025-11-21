@@ -295,6 +295,10 @@ def track():
         else:
             BLOCK_IPS.add(ip)
             data["autoblocked"] = {"by": "ip", "reason": reason_ab}
+
+        # 🔥🔥 GUARDAR EN DISCO inmediatamente
+        save_storage()
+
     else:
         data["autoblocked"] = False
 
