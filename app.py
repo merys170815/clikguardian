@@ -65,6 +65,10 @@ CORS(app, resources={
     r"/track": {"origins": [
         "https://medigoencas.com",
         "https://www.medigoencas.com",
+        "https://sumedicoencasa.com",
+        "https://www.sumedicoencasa.com",
+        "https://asisvitalips.com",
+        "https://www.asisvitalips.com",
         "https://clikguardian.onrender.com",
         "http://localhost",
         "http://127.0.0.1"
