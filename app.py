@@ -224,27 +224,6 @@ def compute_risk(ev: dict):
 def home():
     return render_template("index.html")
 
-# ✅ GUARD API
-@app.post("/guard")
-def guard():
-    data = request.get_json(force=True, silent=True) or {}
-    device_id = (data.get("device_id") or "").strip()
-    ip = get_client_ip()
-
-    if device_id in WHITELIST_DEVICES:
-        return jsonify({"blocked": False, "by": "whitelist"})
-
-    if ip in WHITELIST_IPS:
-        return jsonify({"blocked": False, "by": "whitelist"})
-
-    if device_id and device_id in BLOCK_DEVICES:
-        return jsonify({"blocked": True, "by": "device"}), 403
-
-    if ip in BLOCK_IPS:
-        return jsonify({"blocked": True, "by": "ip"}), 403
-
-    return jsonify({"blocked": False})
-
 # ✅ TRACK
 @app.route("/track", methods=["POST","OPTIONS"])
 def track():

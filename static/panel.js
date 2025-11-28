@@ -1,4 +1,14 @@
 // ==========================
+// Device ID Permanente
+// ==========================
+let GLOBAL_DEVICE_ID = null;
+
+async function loadDeviceID() {
+    GLOBAL_DEVICE_ID = await window.getPermanentDeviceID();
+}
+loadDeviceID();
+
+// ==========================
 // Helpers (riesgo, eventos, origen)
 // ==========================
 function riskToLevel(score) {
@@ -28,7 +38,6 @@ function explain(event, dwell) {
 
 function origen(r) {
   const ref = (r.ref || "").toLowerCase();
-  const url = (r.url || "").toLowerCase();
   const gclid = r.gclid || null;
   if (gclid) return "Google Ads (gclid)";
   if (ref.includes("google")) return "Búsqueda orgánica Google";
@@ -101,6 +110,7 @@ async function unblockIp(ip) {
     alert("Error al desbloquear la IP");
   }
 }
+
 // ==========================
 // Render fila (CON CAMPO SITIO)
 // ==========================
@@ -108,10 +118,8 @@ function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
-  // Estado actual enviado desde backend
   const blockedNow = !!r.blocked_now;
 
-  // Etiqueta del tipo de bloqueo
   let blockedLabel = "-";
   if (blockedNow) {
     if (r.blocked_by === "device") blockedLabel = "Bloqueado (device)";
@@ -119,10 +127,8 @@ function renderRow(r) {
     else blockedLabel = "Bloqueado";
   }
 
-  // ¿Tiene device_id?
   const hasDevice = !!(r.device_id && r.device_id !== "");
 
-  // Llamadas correctas según device o IP
   const blockCall = hasDevice
     ? `blockDevice('${r.device_id}')`
     : `blockIp('${r.ip}')`;
@@ -136,16 +142,13 @@ function renderRow(r) {
       <td>${r.ts || "-"}</td>
       <td>${r.ip || "-"}</td>
 
-      <!-- Device -->
       <td>${hasDevice ? r.device_id : "<span style='opacity:.4'>Sin Device ID</span>"}</td>
 
-      <!-- Ciudad / ISP -->
       <td>
         ${r.geo?.city || "-"}, ${r.geo?.region || ""}
         <br><small>${r.geo?.isp || ""}</small>
       </td>
 
-      <!-- Sitio -->
       <td>${r.site || "-"}</td>
 
       <td>${translateEvent(r.type)}</td>
@@ -159,7 +162,6 @@ function renderRow(r) {
         </span>
       </td>
 
-      <!-- Estado -->
       <td>
         ${blockedNow
           ? `<strong style="color:#ef4444">${blockedLabel}</strong>`
@@ -167,7 +169,6 @@ function renderRow(r) {
         }
       </td>
 
-      <!-- Acciones -->
       <td>
         <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">
           Ver mapa
@@ -187,7 +188,6 @@ function renderRow(r) {
     </tr>
   `;
 }
-
 
 // ==========================
 // Cargar datos

@@ -326,21 +326,43 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://openfpcdn.io/fingerprintjs/v3"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://openfpcdn.io/fingerprintjs/v3"></script>
 
+<!-- 🔥 Device ID PERMANENTE (correcto y limpio) -->
 <script>
-  let DEVICE_ID = null;
+async function getPermanentDeviceID() {
 
-  async function initFingerprint() {
+    // 1. Revisar si ya existe en localStorage
+    let localId = localStorage.getItem("cg_device_id");
+
+    // 2. Revisar cookie
+    let cookieId = document.cookie.split("cgid=")[1]?.split(";")[0];
+
+    if (localId) return localId;
+    if (cookieId) {
+        localStorage.setItem("cg_device_id", cookieId);
+        return cookieId;
+    }
+
+    // 3. Generar fingerprint real
     const fp = await FingerprintJS.load();
     const result = await fp.get();
-    DEVICE_ID = result.visitorId;
-    window.DEVICE_ID = DEVICE_ID;
-  }
+    const fp_id = result.visitorId;
 
-  initFingerprint();
+    // 4. Crear ID permanente resistente
+    const full_id = "perm-" + btoa(fp_id + "-" + navigator.userAgent).substring(0, 48);
+
+    // 5. Guardar en cookie + localStorage    .setItem("cg_device_id", full_id);
+    document.cookie = "cgid=" + full_id + "; max-age=31536000; path=/";
+
+    return full_id;
+}
+
+window.getPermanentDeviceID = getPermanentDeviceID;
 </script>
 
-<!-- PANEL JS (tu script de backend) -->
+<!-- PANEL JS -->
 <script src="/static/panel.js?v=5"></script>
 
 <!-- ✔ SCRIPT PARA OCULTAR COLUMNAS -->
