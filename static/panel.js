@@ -108,15 +108,21 @@ function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
-  // Estado actual
+  // Estado actual enviado desde backend
   const blockedNow = !!r.blocked_now;
-  const blockedBy =
-    r.blocked_by ||
-    (r.device_id && r.blocked ? "device" : (r.blocked ? "ip" : null));
 
-  const hasDevice = !!r.device_id;
+  // Etiqueta del tipo de bloqueo
+  let blockedLabel = "-";
+  if (blockedNow) {
+    if (r.blocked_by === "device") blockedLabel = "Bloqueado (device)";
+    else if (r.blocked_by === "ip") blockedLabel = "Bloqueado (IP)";
+    else blockedLabel = "Bloqueado";
+  }
 
-  // Bloqueo / desbloqueo
+  // ¿Tiene device_id?
+  const hasDevice = !!(r.device_id && r.device_id !== "");
+
+  // Llamadas correctas según device o IP
   const blockCall = hasDevice
     ? `blockDevice('${r.device_id}')`
     : `blockIp('${r.ip}')`;
@@ -129,10 +135,17 @@ function renderRow(r) {
     <tr class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
       <td>${r.ts || "-"}</td>
       <td>${r.ip || "-"}</td>
-      <td>${r.device_id || "<span style='opacity:.4'>-</span>"}</td>
-      <td>${r.geo?.city || "-"}, ${r.geo?.region || ""}<br><small>${r.geo?.isp || ""}</small></td>
 
-      <!-- NUEVA COLUMNA “Sitio” -->
+      <!-- Device -->
+      <td>${hasDevice ? r.device_id : "<span style='opacity:.4'>Sin Device ID</span>"}</td>
+
+      <!-- Ciudad / ISP -->
+      <td>
+        ${r.geo?.city || "-"}, ${r.geo?.region || ""}
+        <br><small>${r.geo?.isp || ""}</small>
+      </td>
+
+      <!-- Sitio -->
       <td>${r.site || "-"}</td>
 
       <td>${translateEvent(r.type)}</td>
@@ -140,14 +153,21 @@ function renderRow(r) {
       <td>${origen(r)}</td>
       <td>${dwell ? dwell + " ms" : "-"}</td>
 
-      <td><span class="badge ${riskToLevel(r.risk?.score || 0)}">${riskToLevel(r.risk?.score || 0)}</span></td>
-
       <td>
-        ${blockedNow
-          ? `<strong style="color:#ef4444">Bloqueado (${blockedBy})</strong>`
-          : `<span style="color:#10b981">Activo</span>`}
+        <span class="badge ${riskToLevel(r.risk?.score || 0)}">
+          ${riskToLevel(r.risk?.score || 0)}
+        </span>
       </td>
 
+      <!-- Estado -->
+      <td>
+        ${blockedNow
+          ? `<strong style="color:#ef4444">${blockedLabel}</strong>`
+          : `<span style="color:#10b981">Activo</span>`
+        }
+      </td>
+
+      <!-- Acciones -->
       <td>
         <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">
           Ver mapa
@@ -155,13 +175,19 @@ function renderRow(r) {
 
         ${
           blockedNow
-            ? `<button style="margin-left:6px" onclick="${unblockCall}">Desbloquear</button>`
-            : `<button style="margin-left:6px;background:#ef4444;color:white" onclick="${blockCall}">Bloquear</button>`
+            ? `<button style="margin-left:6px" onclick="${unblockCall}">
+                 Desbloquear
+               </button>`
+            : `<button style="margin-left:6px;background:#ef4444;color:white"
+                 onclick="${blockCall}">
+                 Bloquear
+               </button>`
         }
       </td>
     </tr>
   `;
 }
+
 
 // ==========================
 // Cargar datos
