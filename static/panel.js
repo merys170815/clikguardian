@@ -1,12 +1,3 @@
-// ==========================
-// Device ID Permanente
-// ==========================
-let GLOBAL_DEVICE_ID = null;
-
-async function loadDeviceID() {
-    GLOBAL_DEVICE_ID = await window.getPermanentDeviceID();
-}
-loadDeviceID();
 
 // ==========================
 // Helpers (riesgo, eventos, origen)

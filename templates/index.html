@@ -328,39 +328,67 @@
 <script src="https://openfpcdn.io/fingerprintjs/v3"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://openfpcdn.io/fingerprintjs/v3"></script>
-
-<!-- 🔥 Device ID PERMANENTE (correcto y limpio) -->
 <script>
-async function getPermanentDeviceID() {
+// =======================================
+//  DEVICE ID PERMANENTE — A PRUEBA DE TODO
+// =======================================
 
-    // 1. Revisar si ya existe en localStorage
-    let localId = localStorage.getItem("cg_device_id");
+window.DEVICE_ID = null;
 
-    // 2. Revisar cookie
-    let cookieId = document.cookie.split("cgid=")[1]?.split(";")[0];
-
-    if (localId) return localId;
-    if (cookieId) {
-        localStorage.setItem("cg_device_id", cookieId);
-        return cookieId;
-    }
-
-    // 3. Generar fingerprint real
-    const fp = await FingerprintJS.load();
-    const result = await fp.get();
-    const fp_id = result.visitorId;
-
-    // 4. Crear ID permanente resistente
-    const full_id = "perm-" + btoa(fp_id + "-" + navigator.userAgent).substring(0, 48);
-
-    // 5. Guardar en cookie + localStorage    .setItem("cg_device_id", full_id);
-    document.cookie = "cgid=" + full_id + "; max-age=31536000; path=/";
-
-    return full_id;
+function generateBackupID(){
+    const raw = navigator.userAgent + "-" + Date.now() + "-" + Math.random();
+    return "perm-" + btoa(raw).substring(0,48);
 }
 
-window.getPermanentDeviceID = getPermanentDeviceID;
+function saveDeviceID(id){
+    try { localStorage.setItem("cg_device_id", id); } catch(e){}
+    document.cookie = "cgid=" + id + "; max-age=31536000; path=/";
+}
+
+function loadStoredID(){
+    try {
+        const localId = localStorage.getItem("cg_device_id");
+        if (localId) return localId;
+    } catch(e){}
+
+    try {
+        const cookieId = document.cookie.split("cgid=")[1]?.split(";")[0];
+        if (cookieId) return cookieId;
+    } catch(e){}
+
+    return null;
+}
+
+async function getPermanentDeviceID(){
+
+    // 1️⃣ Revisar si ya existe guardado
+    let stored = loadStoredID();
+    if (stored){
+        window.DEVICE_ID = stored;
+        return stored;
+    }
+
+    // 2️⃣ Intentar FingerprintJS — si falla usamos fallback
+    let newId = null;
+    try {
+        const fp = await FingerprintJS.load();
+        const result = await fp.get();
+        const fp_id = result.visitorId;
+        newId = "perm-" + btoa(fp_id + "-" + navigator.userAgent).substring(0,48);
+    } catch(e){
+        // 3️⃣ Fallback totalmente local
+        newId = generateBackupID();
+    }
+
+    saveDeviceID(newId);
+    window.DEVICE_ID = newId;
+    return newId;
+}
+
+// Inicializar SIEMPRE
+getPermanentDeviceID();
 </script>
+
 
 <!-- PANEL JS -->
 <script src="/static/panel.js?v=5"></script>
