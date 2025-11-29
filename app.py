@@ -219,6 +219,26 @@ def compute_risk(ev: dict):
 
     return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
 
+@app.route("/guard", methods=["POST", "OPTIONS"])
+def guard_check():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    data = request.get_json(force=True, silent=True) or {}
+    device_id = (data.get("device_id") or "").strip()
+    ip = get_client_ip()
+
+    # 🔥 1. Si está en whitelist → permitir siempre
+    if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
+        return jsonify({"ok": True, "allowed": True})
+
+    # 🔥 2. Si está bloqueado → devolver 403
+    if device_id in BLOCK_DEVICES or ip in BLOCK_IPS:
+        return ("", 403)
+
+    # 🔥 3. Si no está bloqueado → permitir
+    return jsonify({"ok": True, "allowed": True})
+
 # ✅ UI
 @app.route("/")
 def home():
