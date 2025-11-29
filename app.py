@@ -120,33 +120,119 @@ def get_client_ip():
     if xff:
         return xff.split(",")[0].strip()
     return request.remote_addr
-
 @lru_cache(maxsize=20000)
 def geo_lookup(ip: str):
-    try:
-        if not ip or ip.startswith(("127.","10.","192.168.","::1")):
-            return {"country":"LOCAL","region":"-","city":"-","district":"-","isp":"LAN",
-                    "asn":"-","lat":0,"lon":0,"vpn":False}
-        r = requests.get(f"https://ipwho.is/{ip}", timeout=3)
-        j = r.json() if r.ok else {}
-        conn = j.get("connection",{}) or {}
-        sec = j.get("security",{}) or {}
+    """Geo Lookup Inteligente con 3 APIs + fusión de ciudad más probable"""
 
+    # 🔥 1. Localhost o redes internas
+    if not ip or ip.startswith(("127.", "10.", "192.168.", "::1")):
         return {
-            "country": j.get("country","-"),
-            "region":  j.get("region","-"),
-            "city":    j.get("city","-"),
-            "district":j.get("district","-"),
-            "isp":     conn.get("isp") or j.get("org","-"),
-            "asn":     conn.get("asn","-"),
-            "lat":     j.get("latitude",0),
-            "lon":     j.get("longitude",0),
-            "vpn":     bool(sec.get("vpn",False))
+            "country": "LOCAL",
+            "region": "-",
+            "city": "Local",
+            "district": "-",
+            "isp": "LAN",
+            "asn": "-",
+            "lat": 0,
+            "lon": 0,
+            "vpn": False
         }
 
-    except Exception:
-        return {"country":"-","region":"-","city":"-","district":"-","isp":"-",
-                "asn":"-","lat":0,"lon":0,"vpn":False}
+    results = []
+
+    # ================================
+    # API 1 → ipwho.is
+    # ================================
+    try:
+        r1 = requests.get(f"https://ipwho.is/{ip}", timeout=2).json()
+        results.append({
+            "city": r1.get("city"),
+            "region": r1.get("region"),
+            "country": r1.get("country"),
+            "isp": (r1.get("connection") or {}).get("isp") or r1.get("org"),
+            "asn": (r1.get("connection") or {}).get("asn"),
+            "lat": r1.get("latitude"),
+            "lon": r1.get("longitude"),
+            "vpn": (r1.get("security") or {}).get("vpn", False)
+        })
+    except:
+        pass
+
+    # ================================
+    # API 2 → ipapi.co
+    # ================================
+    try:
+        r2 = requests.get(f"https://ipapi.co/{ip}/json/", timeout=2).json()
+        results.append({
+            "city": r2.get("city"),
+            "region": r2.get("region"),
+            "country": r2.get("country_name"),
+            "isp": r2.get("org"),
+            "asn": r2.get("asn"),
+            "lat": r2.get("latitude"),
+            "lon": r2.get("longitude"),
+            "vpn": False  # ipapi no devuelve vpn
+        })
+    except:
+        pass
+
+    # ================================
+    # API 3 → ipinfo.io  (sin token usa datos libres)
+    # ================================
+    try:
+        r3 = requests.get(f"https://ipinfo.io/{ip}/json", timeout=2).json()
+        loc = (r3.get("loc") or "0,0").split(",")
+
+        results.append({
+            "city": r3.get("city"),
+            "region": r3.get("region"),
+            "country": r3.get("country"),
+            "isp": r3.get("org"),
+            "asn": None,
+            "lat": float(loc[0]),
+            "lon": float(loc[1]),
+            "vpn": False
+        })
+    except:
+        pass
+
+    # ================================
+    # Si todas fallan
+    # ================================
+    if not results:
+        return {
+            "city": "-",
+            "region": "-",
+            "country": "-",
+            "isp": "-",
+            "asn": "-",
+            "lat": 0,
+            "lon": 0,
+            "vpn": False
+        }
+
+    # ================================
+    # FUSIÓN INTELIGENTE
+    # Elegir ciudad más repetida (o la que no sea None)
+    # ================================
+    def most_common(field):
+        vals = [r.get(field) for r in results if r.get(field)]
+        if not vals:
+            return "-"
+        return max(set(vals), key=vals.count)
+
+    fused = {
+        "city": most_common("city"),
+        "region": most_common("region"),
+        "country": most_common("country"),
+        "isp": most_common("isp"),
+        "asn": most_common("asn"),
+        "lat": most_common("lat"),
+        "lon": most_common("lon"),
+        "vpn": any([r.get("vpn") for r in results])
+    }
+
+    return fused
 
 def _prune_window(dq: deque, cutoff: datetime):
     while dq and dq[0] < cutoff:
