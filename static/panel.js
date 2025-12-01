@@ -101,6 +101,18 @@ async function unblockIp(ip) {
     alert("Error al desbloquear la IP");
   }
 }
+function renderClientMeta(r) {
+  return `
+    <div class="meta-box">
+      <strong>UA:</strong> ${r.ua || "-"}<br>
+      <strong>Lang:</strong> ${r.lang || "-"}<br>
+      <strong>TZ:</strong> ${r.tz || "-"}<br>
+      <strong>Platform:</strong> ${r.platform || "-"}<br>
+      <strong>Screen:</strong> ${r.screen || "-"}<br>
+      <strong>Keyword:</strong> ${r.keyword || "-"}
+    </div>
+  `;
+}
 
 // ==========================
 // Render fila (CON CAMPO SITIO)
@@ -142,7 +154,14 @@ function renderRow(r) {
 
       <td>${r.site || "-"}</td>
 
-      <td>${translateEvent(r.type)}</td>
+      <td>
+  ${translateEvent(r.type)}
+  <br>
+  <button class="meta-btn" onclick="showMeta(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+    Ver meta
+  </button>
+</td>
+
       <td>${r.ref || "-"}</td>
       <td>${origen(r)}</td>
       <td>${dwell ? dwell + " ms" : "-"}</td>
@@ -215,6 +234,17 @@ async function loadData() {
   document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
   document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
 }
+function showMeta(r) {
+  const box = document.getElementById("metaBox");
+  box.innerHTML = renderClientMeta(r);
+  box.style.display = "block";
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.id !== "metaBox") {
+    document.getElementById("metaBox").style.display = "none";
+  }
+});
 
 // ==========================
 // Map modal

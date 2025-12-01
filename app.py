@@ -11,7 +11,64 @@ import requests, re, logging
 
 import json, os
 
+
+import hashlib
+
+
+LAST_DWELL_DEVICE = {}
+LAST_DWELL_IP = {}
+
+
+HIGH_RISK_KEYWORDS = {
+    "urgencias médicas",
+    "urgencias medicas",
+    "médico 24 horas",
+    "medico 24 horas",
+    "urgencias médicas domicilio",
+    "urgencias medicas domicilio",
+    "doctor urgente",
+    "doctor a domicilio urgente"
+}
+
+
+def push_ip_to_google_ads(ip: str):
+    logging.info(f"📨 (simulado) Enviando IP a Google Ads para exclusión: {ip}")
+
+def build_fingerprint(data: dict) -> str | None:
+    """
+    Construye un fingerprint fuerte basado en:
+    - ua (user-agent)
+    - lang
+    - tz
+    - screen (ej: 1080x1920)
+    - platform
+    """
+    ua = (data.get("ua") or "").strip()
+    lang = (data.get("lang") or "").strip()
+    tz = (data.get("tz") or "").strip()
+    screen = str(data.get("screen") or "").strip()
+    platform = (data.get("platform") or "").strip()
+
+    raw = "|".join([ua, lang, tz, screen, platform]).strip()
+    if not raw:
+        return None
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 STORAGE_FILE = "storage.json"
+
+KNOWN_DATACENTERS = [
+    "aws", "amazon", "google cloud", "gcp", "azure",
+    "microsoft", "ovh", "digitalocean", "contabo",
+    "vultr", "linode", "hetzner"
+]
+
+
+KNOWN_DATACENTERS = [
+    "aws", "amazon", "google cloud", "gcp", "azure",
+    "microsoft", "ovh", "digitalocean", "contabo",
+    "vultr", "linode", "hetzner"
+]
 
 def load_storage():
     if not os.path.exists(STORAGE_FILE):
@@ -265,7 +322,6 @@ def had_good_dwell_recently(device_id: str, minutes: int, min_ms: int) -> bool:
             return True
 
     return False
-
 def compute_risk(ev: dict):
     score = 0
     reasons = []
@@ -273,37 +329,92 @@ def compute_risk(ev: dict):
     evt_type = (ev.get("type") or "").lower()
     dwell = ev.get("dwell_ms") or 0
 
+    # ============================
+    # ⏱️ Regla 1 — Dwell bajo
+    # ============================
     if dwell and dwell < 800:
         score += 30
         reasons.append("Dwell < 800ms")
 
+    # ============================
+    # 🤖 Regla 2 — User Agent sospechoso
+    # ============================
     ua = (ev.get("ua") or "").lower()
     if BOT_UA_PAT.search(ua):
         score += 25
         reasons.append("UA sospechosa")
 
+    # ============================
+    # 📌 Regla 3 — Ads sin gclid
+    # ============================
     ref = (ev.get("ref") or "")
     url = (ev.get("url") or "")
     if ("google" in ref or "gclid=" in url) and "gclid=" not in url:
         score += 25
         reasons.append("Ads ref sin gclid")
 
+    # ============================
+    # 🌎 Regla 4 — País ≠ CO
+    # ============================
     geo = ev.get("geo") or {}
-    if geo.get("country") not in ("LOCAL","Colombia","CO",None):
+    if geo.get("country") not in ("LOCAL", "Colombia", "CO", None):
         score += 10
         reasons.append("País ≠ CO")
 
+    # ============================
+    # 🛡️ Regla 5 — VPN
+    # ============================
     if geo.get("vpn"):
         score += 15
         reasons.append("VPN detectada")
 
+    # ============================
+    # 📱 Regla 6 — Dwell repetido (patrón avanzado)
+    # ============================
+    last_dev = ev.get("last_dwell_device")
+    last_ip = ev.get("last_dwell_ip")
+
+    if dwell and last_dev and abs(dwell - last_dev) < 80:
+        score += 20
+        reasons.append("Dwell casi idéntico por device")
+
+    if dwell and (not last_dev) and last_ip and abs(dwell - last_ip) < 80:
+        score += 15
+        reasons.append("Dwell casi idéntico por IP")
+
+    # ============================
+    # 🏢 Regla 7 — ISP Datacenter
+    # ============================
+    isp = (geo.get("isp") or "").lower()
+    if isp and any(dc in isp for dc in KNOWN_DATACENTERS):
+        score += 40
+        reasons.append("ISP datacenter/proxy sospechoso")
+
+    # ============================
+    # 📞 Regla 8 — WhatsApp mitiga
+    # ============================
     if evt_type == "whatsapp_click":
         score = max(0, score - 30)
         reasons.append("Click en WhatsApp (mitiga)")
 
+    # ==========================================
+    # 🎯 SENSIBILIDAD POR PALABRA CLAVE
+    # ==========================================
+    keyword = (ev.get("keyword") or "").lower().strip()
+
+    if keyword in HIGH_RISK_KEYWORDS:
+        threshold = 60
+    else:
+        threshold = SETTINGS["risk_threshold"]
+
     score = max(0, min(100, score))
 
-    return {"score": score, "suspicious": score >= SETTINGS["risk_threshold"], "reasons": reasons}
+    return {
+        "score": score,
+        "suspicious": score >= threshold,
+        "threshold_used": threshold,
+        "reasons": reasons
+    }
 
 @app.route("/guard", methods=["POST", "OPTIONS"])
 def guard_check():
@@ -329,7 +440,6 @@ def guard_check():
 @app.route("/")
 def home():
     return render_template("index.html")
-
 # ✅ TRACK
 @app.route("/track", methods=["POST","OPTIONS"])
 def track():
@@ -346,37 +456,58 @@ def track():
     if device_id:
         LAST_SEEN_DEVICE[device_id].append(now)
 
+    # Datos base
     data["ip"] = ip
     data["device_id"] = device_id
     data["ts"] = now_iso()
     data["geo"] = geo_lookup(ip)
     data["risk"] = compute_risk(data)
 
-    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+    # Guardar dwell previo para patrones avanzados
+    last_dwell_dev = LAST_DWELL_DEVICE.get(device_id) if device_id else None
+    last_dwell_ip = LAST_DWELL_IP.get(ip)
+
+    data["last_dwell_device"] = last_dwell_dev
+    data["last_dwell_ip"] = last_dwell_ip
+
+    # Repeticiones
+    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) \
+        if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+
     dwell = data.get("dwell_ms") or 0
     evt_type = (data.get("type") or "").lower()
 
+    # WHITELIST
     if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
         data["blocked"] = False
         EVENTS.append(data)
         return ("", 204)
 
+    # ==============================
+    # LÓGICA AUTOBLOCK
+    # ==============================
     autoblock = False
     reason_ab = None
 
-    if SETTINGS["risk_autoblock"] and data["risk"]["score"] >= SETTINGS["risk_threshold"]:
+    # Bloqueo por riesgo
+    if SETTINGS["risk_autoblock"] and data["risk"]["suspicious"]:
         autoblock = True
         reason_ab = "risk"
 
+    # Repeticiones en WhatsApp
     if evt_type == "whatsapp_click" and repeats >= SETTINGS["repeat_required"]:
         if not had_good_dwell_recently(device_id, SETTINGS["good_dwell_window_minutes"], SETTINGS["min_good_dwell_ms"]):
             autoblock = True
             reason_ab = "wa_repeats"
 
+    # Repeticiones rápidas + dwell bajo
     if dwell < SETTINGS["fast_dwell_ms"] and repeats >= SETTINGS["fast_repeat_required"]:
         autoblock = True
         reason_ab = "fast_repeats"
 
+    # ==============================
+    # APLICAR AUTOBLOCK
+    # ==============================
     if autoblock:
         if device_id:
             BLOCK_DEVICES.add(device_id)
@@ -385,15 +516,25 @@ def track():
             BLOCK_IPS.add(ip)
             data["autoblocked"] = {"by": "ip", "reason": reason_ab}
 
-        # 🔥🔥 GUARDAR EN DISCO inmediatamente
+        # 🔥 Guardar storage inmediato
         save_storage()
+
+        # 👉 SOLO se envía a Google Ads cuando bloquea
+        push_ip_to_google_ads(ip)
 
     else:
         data["autoblocked"] = False
 
+    # Estado final del bloqueo
     data["blocked"] = (device_id in BLOCK_DEVICES) or (ip in BLOCK_IPS)
-    EVENTS.append(data)
 
+    # Actualizar dwell para patrones futuros
+    if device_id and dwell:
+        LAST_DWELL_DEVICE[device_id] = dwell
+    if dwell:
+        LAST_DWELL_IP[ip] = dwell
+
+    EVENTS.append(data)
     return ("", 204)
 
 # ✅ APIs
