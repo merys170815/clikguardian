@@ -258,7 +258,9 @@ async function loadData() {
 
   let data = [];
   try {
-    const res = await fetch("/api/events");
+    const res = await fetch("https://api.medigoencas.com/api/events")
+
+;
     const json = await res.json();
     data = json.events || [];
   } catch (e) {
@@ -540,7 +542,7 @@ async function loadData() {
 
   let data = [];
   try {
-    const res = await fetch("/api/events");
+    const res = await fetch("https://api.medigoencas.com/api/events");
     const json = await res.json();
     data = json.events || [];
   } catch (e) {
