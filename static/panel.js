@@ -310,9 +310,6 @@ async function loadData() {
     console.error("Error cargando eventos", e);
   }
 
-  if (onlySuspicious) {
-    data = data.filter(ev => (ev.risk?.score || 0) >= 40);
-  }
 
   // Filtrar filas ocultas solo en esta vista
   const hidden = getHiddenSet();
