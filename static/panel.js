@@ -1,3 +1,53 @@
+// ======================================================
+// 🔥 Fingerprint REAL PRO — ÚNICO incluso en celulares iguales
+// ======================================================
+
+async function buildFingerprint() {
+
+  // 1. Persistente por navegador
+  let persistentId = localStorage.getItem("cg_persistent_id");
+  if (!persistentId) {
+    persistentId = crypto.randomUUID();
+    localStorage.setItem("cg_persistent_id", persistentId);
+  }
+
+  // 2. Canvas fingerprint
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.textBaseline = "top";
+  ctx.font = "16px Arial";
+  ctx.fillStyle = "#f60";
+  ctx.fillText("ClickGuardian-Pro-FP", 2, 2);
+  const canvasFP = canvas.toDataURL();
+
+  // 3. Audio fingerprint
+  const audioCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+  const oscillator = audioCtx.createOscillator();
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
+
+  const compressor = audioCtx.createDynamicsCompressor();
+  oscillator.connect(compressor);
+  compressor.connect(audioCtx.destination);
+  oscillator.start(0);
+
+  const audioBuffer = await audioCtx.startRendering();
+  const audioData = audioBuffer.getChannelData(0).slice(0, 50).join("");
+
+  // 4. Sistema básico
+  const basicRaw = [
+    navigator.userAgent,
+    navigator.language,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    navigator.platform,
+    `${window.screen.width}x${window.screen.height}`
+  ].join("|");
+
+  // 5. Mezcla final
+  const raw = persistentId + "|" + canvasFP + "|" + audioData + "|" + basicRaw;
+
+  return await sha256(raw);
+}
 
 // ==========================
 // Helpers (riesgo, eventos, origen)
@@ -113,11 +163,10 @@ function renderClientMeta(r) {
     </div>
   `;
 }
-
 // ==========================
-// Render fila (CON CAMPO SITIO)
+// Render fila (CON X PARA BORRAR FILA DEL PANEL)
 // ==========================
-function renderRow(r) {
+function renderRow(r, index) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
@@ -141,7 +190,7 @@ function renderRow(r) {
     : `unblockIp('${r.ip}')`;
 
   return `
-    <tr class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
+    <tr id="row_${index}" class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
       <td>${r.ts || "-"}</td>
       <td>${r.ip || "-"}</td>
 
@@ -155,12 +204,12 @@ function renderRow(r) {
       <td>${r.site || "-"}</td>
 
       <td>
-  ${translateEvent(r.type)}
-  <br>
-  <button class="meta-btn" onclick="showMeta(${JSON.stringify(r).replace(/"/g, '&quot;')})">
-    Ver meta
-  </button>
-</td>
+        ${translateEvent(r.type)}
+        <br>
+        <button class="meta-btn" onclick="showMeta(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+          Ver meta
+        </button>
+      </td>
 
       <td>${r.ref || "-"}</td>
       <td>${origen(r)}</td>
@@ -195,6 +244,14 @@ function renderRow(r) {
                </button>`
         }
       </td>
+
+      <!-- ⚡ BOTÓN ROJO X PARA BORRAR SOLO DEL PANEL (sin afectar memoria) -->
+      <td>
+        <button onclick="hideRow('${r.ts || ""}','${r.ip || ""}','${r.device_id || ""}')"
+                style="color:white;background:#dc2626;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;">
+          ❌
+        </button>
+      </td>
     </tr>
   `;
 }
@@ -218,6 +275,9 @@ async function loadData() {
   if (onlySuspicious) {
     data = data.filter(ev => (ev.risk?.score || 0) >= 40);
   }
+    // Filtrar filas ocultas solo en esta vista
+  const hidden = getHiddenSet();
+  data = data.filter(ev => !hidden.has(eventKey(ev)));
 
   if (search) {
     data = data.filter(x =>
@@ -234,6 +294,12 @@ async function loadData() {
   document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
   document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
 }
+
+function removeRow(index) {
+  const row = document.getElementById("row_" + index);
+  if (row) row.remove();
+}
+
 function showMeta(r) {
   const box = document.getElementById("metaBox");
   box.innerHTML = renderClientMeta(r);
@@ -265,6 +331,43 @@ function openMap(lat, lon, city) {
 document.getElementById("closeMap").onclick = () => document.getElementById("mapModal").style.display = "none";
 document.getElementById("zoomIn").onclick = () => map && map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
+
+// ==========================
+// Ocultar filas solo en el panel (no borra de storage)
+// ==========================
+const HIDDEN_KEY = "cg_hidden_events";
+
+// lee del localStorage
+function getHiddenSet() {
+  try {
+    const raw = localStorage.getItem(HIDDEN_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch(e) {
+    return new Set();
+  }
+}
+
+function saveHiddenSet(set) {
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set]));
+  } catch(e) {}
+}
+
+// Genera una clave única del evento
+function eventKey(r) {
+  return (r.ts || "") + "|" + (r.ip || "") + "|" + (r.device_id || "");
+}
+
+// Oculta una fila (solo visual)
+function hideRow(ts, ip, device_id) {
+  const set = getHiddenSet();
+  const key = (ts || "") + "|" + (ip || "") + "|" + (device_id || "");
+  set.add(key);
+  saveHiddenSet(set);
+  // volver a pintar la tabla
+  loadData();
+}
 
 // ==========================
 // Auto-reload

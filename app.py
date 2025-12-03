@@ -8,12 +8,22 @@ from datetime import datetime, timezone, timedelta
 from collections import deque, defaultdict
 from functools import lru_cache
 import requests, re, logging
-
+from ipaddress import ip_network, ip_address
+from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
 import json, os
 
 
 import hashlib
 
+
+def get_account_for_domain(domain: str):
+    domain = domain.lower()
+    if "medigo" in domain:
+        return "7730048070"     # MediGo
+    if "sumedico" in domain:
+        return "9618914395"     # Su Médico
+    return "7730048070"         # Default
 
 LAST_DWELL_DEVICE = {}
 LAST_DWELL_IP = {}
@@ -30,9 +40,6 @@ HIGH_RISK_KEYWORDS = {
     "doctor a domicilio urgente"
 }
 
-
-def push_ip_to_google_ads(ip: str):
-    logging.info(f"📨 (simulado) Enviando IP a Google Ads para exclusión: {ip}")
 
 def build_fingerprint(data: dict) -> str | None:
     """
@@ -63,12 +70,6 @@ KNOWN_DATACENTERS = [
     "vultr", "linode", "hetzner"
 ]
 
-
-KNOWN_DATACENTERS = [
-    "aws", "amazon", "google cloud", "gcp", "azure",
-    "microsoft", "ovh", "digitalocean", "contabo",
-    "vultr", "linode", "hetzner"
-]
 
 def load_storage():
     if not os.path.exists(STORAGE_FILE):
@@ -140,6 +141,9 @@ EVENTS = deque(maxlen=30000)
 BLOCK_DEVICES = set()
 BLOCK_IPS     = set()
 
+BLOCK_RANGES = set()
+
+
 WHITELIST_DEVICES = set()
 WHITELIST_IPS     = set()
 
@@ -177,6 +181,17 @@ def get_client_ip():
     if xff:
         return xff.split(",")[0].strip()
     return request.remote_addr
+
+def is_ip_in_blocked_range(ip: str):
+    try:
+        ip_obj = ip_address(ip)
+        for r in BLOCK_RANGES:
+            if ip_obj in ip_network(r):
+                return True
+    except:
+        pass
+    return False
+
 @lru_cache(maxsize=20000)
 def geo_lookup(ip: str):
     """Geo Lookup Inteligente con 3 APIs + fusión de ciudad más probable"""
@@ -354,10 +369,12 @@ def compute_risk(ev: dict):
         reasons.append("Ads ref sin gclid")
 
     # ============================
-    # 🌎 Regla 4 — País ≠ CO
+    # 🌎 Regla 4 — País ≠ CO (CORREGIDO)
     # ============================
     geo = ev.get("geo") or {}
-    if geo.get("country") not in ("LOCAL", "Colombia", "CO", None):
+    country = (geo.get("country") or "").lower().strip()
+
+    if country not in ("colombia", "co", "local"):
         score += 10
         reasons.append("País ≠ CO")
 
@@ -369,16 +386,16 @@ def compute_risk(ev: dict):
         reasons.append("VPN detectada")
 
     # ============================
-    # 📱 Regla 6 — Dwell repetido (patrón avanzado)
+    # 📱 Regla 6 — Dwell repetido (CORREGIDO: 80 → 20)
     # ============================
     last_dev = ev.get("last_dwell_device")
     last_ip = ev.get("last_dwell_ip")
 
-    if dwell and last_dev and abs(dwell - last_dev) < 80:
+    if dwell and last_dev and abs(dwell - last_dev) < 20:
         score += 20
         reasons.append("Dwell casi idéntico por device")
 
-    if dwell and (not last_dev) and last_ip and abs(dwell - last_ip) < 80:
+    if dwell and (not last_dev) and last_ip and abs(dwell - last_ip) < 20:
         score += 15
         reasons.append("Dwell casi idéntico por IP")
 
@@ -401,12 +418,32 @@ def compute_risk(ev: dict):
     # 🎯 SENSIBILIDAD POR PALABRA CLAVE
     # ==========================================
     keyword = (ev.get("keyword") or "").lower().strip()
-
     if keyword in HIGH_RISK_KEYWORDS:
         threshold = 60
     else:
         threshold = SETTINGS["risk_threshold"]
 
+    # ============================
+    # 🆕 VPN por TZ y resolución (CORREGIDO)
+    # ============================
+    tz = (ev.get("tz") or "").strip()
+    screen = (ev.get("screen") or "")
+    lang = (ev.get("lang") or "")
+
+    # Colombia = UTC-5
+    if country in ("colombia", "co"):
+        if tz not in ("-05:00", "utc-5", "utc−5", "america/bogota"):
+            score += 20
+            reasons.append("TZ no coincide con CO (VPN probable)")
+
+    # patrón típico de VPN
+    if screen and "1536" in screen and "vpn" in ua:
+        score += 10
+        reasons.append("Patrón de resolución usada en VPN")
+
+    # ============================
+    # Resultado final
+    # ============================
     score = max(0, min(100, score))
 
     return {
@@ -415,6 +452,7 @@ def compute_risk(ev: dict):
         "threshold_used": threshold,
         "reasons": reasons
     }
+
 
 @app.route("/guard", methods=["POST", "OPTIONS"])
 def guard_check():
@@ -425,12 +463,10 @@ def guard_check():
     device_id = (data.get("device_id") or "").strip()
     ip = get_client_ip()
 
-    # 🔥 1. Si está en whitelist → permitir siempre
     if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
         return jsonify({"ok": True, "allowed": True})
 
-    # 🔥 2. Si está bloqueado → devolver 403
-    if device_id in BLOCK_DEVICES or ip in BLOCK_IPS:
+    if device_id in BLOCK_DEVICES or ip in BLOCK_IPS or is_ip_in_blocked_range(ip):
         return ("", 403)
 
     # 🔥 3. Si no está bloqueado → permitir
@@ -440,8 +476,48 @@ def guard_check():
 @app.route("/")
 def home():
     return render_template("index.html")
-# ✅ TRACK
-@app.route("/track", methods=["POST","OPTIONS"])
+
+def push_ip_to_google_ads(ip: str, domain: str = ""):
+    """
+    Bloquea una IP dentro de la cuenta Google Ads correcta
+    (solo funciona si Google aprueba tu developer_token).
+    """
+    try:
+        customer_id = get_account_for_domain(domain)
+
+        # Cargar Google Ads client
+        client = GoogleAdsClient.load_from_storage(
+            "/root/clikguardian/google-ads.yaml"
+        )
+
+        customer_service = client.get_service("CustomerService")
+
+        # Construir operación
+        op = client.get_type("CustomerOperation")
+        op.update.resource_name = customer_service.customer_path(customer_id)
+        op.update.excluded_ips.append(ip)
+
+        # Máscara requerida
+        fm = client.get_type("FieldMask")
+        fm.paths.append("excluded_ips")
+        op.update_mask.CopyFrom(fm)
+
+        # Enviar
+        customer_service.mutate_customer(
+            customer_id=customer_id,
+            operation=op
+        )
+
+        logging.info(f"✅ IP {ip} bloqueada en Google Ads ({customer_id})")
+
+    except Exception as e:
+        logging.error(f"❌ Error bloqueando IP en Google Ads: {e}")
+
+
+# ======================================================
+# ✅ TRACK — versión PRO con bloqueo por RANGO + ASN + ISP
+# ======================================================
+@app.route("/track", methods=["POST", "OPTIONS"])
 def track():
     if request.method == "OPTIONS":
         return ("", 204)
@@ -449,65 +525,117 @@ def track():
     data = request.get_json(force=True, silent=True) or {}
 
     ip = get_client_ip()
-    device_id = (data.get("device_id") or "").strip() or None
+
+    # ------------------------------------------------------
+    # 🆕  Fingerprint fuerte
+    # ------------------------------------------------------
+    raw_device = (data.get("device_id") or "").strip() or None
+    fingerprint = (data.get("fingerprint") or "").strip() or None
+
+    if not fingerprint:
+        fingerprint = build_fingerprint(data)
+
+    device_id = fingerprint or raw_device
 
     now = datetime.now(timezone.utc)
     LAST_SEEN_IP[ip].append(now)
     if device_id:
         LAST_SEEN_DEVICE[device_id].append(now)
 
-    # Datos base
-    data["ip"] = ip
-    data["device_id"] = device_id
-    data["ts"] = now_iso()
-    data["geo"] = geo_lookup(ip)
-    data["risk"] = compute_risk(data)
-
-    # Guardar dwell previo para patrones avanzados
     last_dwell_dev = LAST_DWELL_DEVICE.get(device_id) if device_id else None
     last_dwell_ip = LAST_DWELL_IP.get(ip)
-
-    data["last_dwell_device"] = last_dwell_dev
-    data["last_dwell_ip"] = last_dwell_ip
-
-    # Repeticiones
-    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) \
-        if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
 
     dwell = data.get("dwell_ms") or 0
     evt_type = (data.get("type") or "").lower()
 
-    # WHITELIST
+    # ------------------------------------------------------
+    # 🆕 GEO con fusión inteligente
+    # ------------------------------------------------------
+    geo = geo_lookup(ip)
+
+    data["ip"] = ip
+    data["device_id"] = device_id
+    data["ts"] = now_iso()
+    data["geo"] = geo
+    data["last_dwell_device"] = last_dwell_dev
+    data["last_dwell_ip"] = last_dwell_ip
+    data["risk"] = compute_risk(data)
+
+    # Actualizar dwell
+    if device_id and dwell:
+        LAST_DWELL_DEVICE[device_id] = dwell
+    if dwell:
+        LAST_DWELL_IP[ip] = dwell
+
+    # ------------------------------------------------------
+    # 🔥 Bloqueo por rango seguro (/24)
+    # ------------------------------------------------------
+    try:
+        parts = ip.split(".")
+        if len(parts) == 4:
+            range_24 = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+            data["range_24"] = range_24
+    except:
+        data["range_24"] = "-"
+
+    # Aplicar bloqueo si pertenece a un rango previamente bloqueado
+    if is_ip_in_blocked_range(ip):
+        data["autoblocked"] = {"by": "range", "reason": "blocked_range"}
+        EVENTS.append(data)
+        return ("", 403)
+
+    # ------------------------------------------------------
+    # 🔥 Bloqueo por ASN + ISP tipo VPN/Datacenter
+    # ------------------------------------------------------
+    asn = geo.get("asn")
+    isp = (geo.get("isp") or "").lower()
+
+    if asn and any(dc in isp for dc in KNOWN_DATACENTERS):
+        BLOCK_IPS.add(ip)
+        data["autoblocked"] = {"by": "asn", "reason": "datacenter"}
+        save_storage()
+        EVENTS.append(data)
+        return ("", 403)
+
+    # ------------------------------------------------------
+    # 🧠 Lógica de riesgo + repetición
+    # ------------------------------------------------------
+    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) \
+        if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+
+    # Whitelist = permitir siempre
     if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
         data["blocked"] = False
         EVENTS.append(data)
         return ("", 204)
 
-    # ==============================
-    # LÓGICA AUTOBLOCK
-    # ==============================
     autoblock = False
     reason_ab = None
 
-    # Bloqueo por riesgo
+    # 1️⃣ Riesgo general
     if SETTINGS["risk_autoblock"] and data["risk"]["suspicious"]:
         autoblock = True
         reason_ab = "risk"
 
-    # Repeticiones en WhatsApp
+    # 2️⃣ WhatsApp pero repetido sospechoso
     if evt_type == "whatsapp_click" and repeats >= SETTINGS["repeat_required"]:
         if not had_good_dwell_recently(device_id, SETTINGS["good_dwell_window_minutes"], SETTINGS["min_good_dwell_ms"]):
             autoblock = True
             reason_ab = "wa_repeats"
 
-    # Repeticiones rápidas + dwell bajo
+    # 3️⃣ Fast-click pattern
     if dwell < SETTINGS["fast_dwell_ms"] and repeats >= SETTINGS["fast_repeat_required"]:
         autoblock = True
         reason_ab = "fast_repeats"
 
-    # ==============================
-    # APLICAR AUTOBLOCK
-    # ==============================
+    # 4️⃣ ISP sospechoso
+    if any(dc in isp for dc in KNOWN_DATACENTERS):
+        autoblock = True
+        reason_ab = "isp_datacenter"
+
+    # ------------------------------------------------------
+    # 🔥 Bloqueo final
+    # ------------------------------------------------------
     if autoblock:
         if device_id:
             BLOCK_DEVICES.add(device_id)
@@ -516,26 +644,20 @@ def track():
             BLOCK_IPS.add(ip)
             data["autoblocked"] = {"by": "ip", "reason": reason_ab}
 
-        # 🔥 Guardar storage inmediato
+        # Push Google Ads → ahora es solo LOG para seguridad
+        dominio = (data.get("url") or "").lower()
+        logging.info(f"[SIMULADO] Bloqueo IP Ads {ip} en {dominio}")
+
         save_storage()
-
-        # 👉 SOLO se envía a Google Ads cuando bloquea
-        push_ip_to_google_ads(ip)
-
     else:
         data["autoblocked"] = False
 
-    # Estado final del bloqueo
+    # Estado final
     data["blocked"] = (device_id in BLOCK_DEVICES) or (ip in BLOCK_IPS)
-
-    # Actualizar dwell para patrones futuros
-    if device_id and dwell:
-        LAST_DWELL_DEVICE[device_id] = dwell
-    if dwell:
-        LAST_DWELL_IP[ip] = dwell
-
     EVENTS.append(data)
+
     return ("", 204)
+
 
 # ✅ APIs
 @app.get("/api/events")
@@ -634,6 +756,30 @@ def set_settings():
             SETTINGS[k] = data[k]
     save_storage()
     return jsonify({"ok": True, "settings": SETTINGS})
+
+@app.get("/api/stats/geo")
+def geo_stats():
+    counter = defaultdict(int)
+    for ev in EVENTS:
+        c = (ev.get("geo") or {}).get("country") or "?"
+        counter[c] += 1
+    return jsonify(counter)
+
+@app.get("/api/stats/asn")
+def asn_stats():
+    counter = defaultdict(int)
+    for ev in EVENTS:
+        a = (ev.get("geo") or {}).get("asn") or "?"
+        counter[a] += 1
+    return jsonify(counter)
+
+@app.get("/api/stats/devices")
+def device_stats():
+    return jsonify({
+        "total_devices": len(LAST_SEEN_DEVICE),
+        "blocked_devices": len(BLOCK_DEVICES),
+        "whitelisted_devices": len(WHITELIST_DEVICES)
+    })
 
 
 # Cargar memoria persistente
