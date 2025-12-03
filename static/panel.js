@@ -48,8 +48,6 @@ async function buildFingerprint() {
 
   return await sha256(raw);
 }
-<<<<<<< HEAD
-=======
 
 // ==========================
 // Helpers (riesgo, eventos, origen)
@@ -324,7 +322,7 @@ document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
 loadData();
 document.getElementById("refresh").onclick = loadData;
 setInterval(loadData, 5000);
->>>>>>> 40b17be828e13a74680b736713e82aa3a5fb6b81
+
 
 // ==========================
 // Helpers (riesgo, eventos, origen)
