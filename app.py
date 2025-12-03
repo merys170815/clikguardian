@@ -114,26 +114,18 @@ def save_storage():
     except Exception as e:
         logging.error(f"❌ Error guardando storage: {e}")
 
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 app = Flask(__name__)
 
-# ✅ CORS
+# ✅ CORS — versión FINAL (incluye /track, /guard, /api/events)
 CORS(app, resources={
-    r"/track": {"origins": [
-        "https://medigoencas.com",
-        "https://www.medigoencas.com",
-        "https://sumedicoencasa.com",
-        "https://www.sumedicoencasa.com",
-        "https://asisvitalips.com",
-        "https://www.asisvitalips.com",
-        "https://clikguardian.onrender.com",
-        "http://localhost",
-        "http://127.0.0.1"
-    ]},
-    r"/api/*": {"origins": "*"},
-    r"/guard": {"origins": "*"}
+    r"/track": {"origins": "*"},
+    r"/guard": {"origins": "*"},
+    r"/api/*": {"origins": "*"},        # ← IMPORTANTE para /api/events
+    r"/events": {"origins": "*"},       # ← por si tu endpoint es /events sin prefijo
+    r"/api/events": {"origins": "*"}    # ← este es el exacto que usa el panel
 })
+
 
 # ✅ Estado global
 EVENTS = deque(maxlen=30000)
