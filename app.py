@@ -25,10 +25,6 @@ def get_account_for_domain(domain: str):
         return "9618914395"     # Su Médico
     return "7730048070"         # Default
 
-LAST_DWELL_DEVICE = {}
-LAST_DWELL_IP = {}
-
-
 HIGH_RISK_KEYWORDS = {
     "urgencias médicas",
     "urgencias medicas",
@@ -118,18 +114,22 @@ CORS(app, resources={
 
 
 # ✅ Estado global
+
 EVENTS = deque(maxlen=30000)
 
 BLOCK_DEVICES = set()
 BLOCK_IPS     = set()
-
-BLOCK_RANGES = set()
-
+BLOCK_RANGES  = set()
 
 WHITELIST_DEVICES = set()
 WHITELIST_IPS     = set()
+
 LAST_SEEN_DEVICE = defaultdict(deque)
 LAST_SEEN_IP     = defaultdict(deque)
+
+LAST_DWELL_DEVICE = {}
+LAST_DWELL_IP     = {}
+
 
 SETTINGS = {
     "risk_autoblock": True,
@@ -505,7 +505,8 @@ def track():
     ip = get_client_ip()
 
     # ------------------------------------------------------
-    # 🔥 DeviceID unificado (fingerprint + backup)
+    # 🔥 DeviceID generado en frontend (localStorage + cookie)
+
     # ------------------------------------------------------
     device_id = (data.get("device_id") or "").strip()
     if not device_id:

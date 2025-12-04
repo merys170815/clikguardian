@@ -358,34 +358,51 @@ function loadStoredID(){
 
     return null;
 }
+<script>
+window.DEVICE_ID = null;
 
-async function getPermanentDeviceID(){
+// Cargar desde localStorage o cookie
+function loadStoredID(){
+  try {
+    const a = localStorage.getItem("cgid");
+    if (a) return a;
+  } catch(e){}
 
-    // 1️⃣ Revisar si ya existe guardado
-    let stored = loadStoredID();
-    if (stored){
-        window.DEVICE_ID = stored;
-        return stored;
-    }
+  try {
+    const cookie = document.cookie.split("cgid=")[1]?.split(";")[0];
+    if (cookie) return cookie;
+  } catch(e){}
 
-    // 2️⃣ Intentar FingerprintJS — si falla usamos fallback
-    let newId = null;
-    try {
-        const fp = await FingerprintJS.load();
-        const result = await fp.get();
-        const fp_id = result.visitorId;
-        newId = "perm-" + btoa(fp_id + "-" + navigator.userAgent).substring(0,48);
-    } catch(e){
-        // 3️⃣ Fallback totalmente local
-        newId = generateBackupID();
-    }
-
-    saveDeviceID(newId);
-    window.DEVICE_ID = newId;
-    return newId;
+  return null;
 }
 
-// Inicializar SIEMPRE
+// Guardar en localStorage + cookie
+function saveDeviceID(id){
+  try { localStorage.setItem("cgid", id); } catch(e){}
+  document.cookie = "cgid=" + id + "; max-age=31536000; path=/";
+}
+
+// Generar ID fuerte y único
+function generateStrongID(){
+  return "perm-" + crypto.randomUUID().replace(/-/g,"");
+}
+
+// Función principal
+async function getPermanentDeviceID(){
+  let stored = loadStoredID();
+  if (stored){
+    window.DEVICE_ID = stored;
+    return stored;
+  }
+
+  // Se genera 1 vez por navegador
+  const newId = generateStrongID();
+  saveDeviceID(newId);
+  window.DEVICE_ID = newId;
+  return newId;
+}
+
+// Inicializar siempre
 getPermanentDeviceID();
 </script>
 
