@@ -41,27 +41,6 @@ HIGH_RISK_KEYWORDS = {
 }
 
 
-def build_fingerprint(data: dict) -> str | None:
-    """
-    Construye un fingerprint fuerte basado en:
-    - ua (user-agent)
-    - lang
-    - tz
-    - screen (ej: 1080x1920)
-    - platform
-    """
-    ua = (data.get("ua") or "").strip()
-    lang = (data.get("lang") or "").strip()
-    tz = (data.get("tz") or "").strip()
-    screen = str(data.get("screen") or "").strip()
-    platform = (data.get("platform") or "").strip()
-
-    raw = "|".join([ua, lang, tz, screen, platform]).strip()
-    if not raw:
-        return None
-
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
 STORAGE_FILE = "storage.json"
 
 KNOWN_DATACENTERS = [
@@ -528,15 +507,10 @@ def track():
     # ------------------------------------------------------
     # 🔥 DeviceID unificado (fingerprint + backup)
     # ------------------------------------------------------
-    raw_dev = (data.get("device_id") or "").strip()
-    fp = (data.get("fingerprint") or "").strip()
-
-    if fp:
-        device_id = fp
-    elif raw_dev:
-        device_id = raw_dev
-    else:
-        device_id = build_fingerprint(data)
+    device_id = (data.get("device_id") or "").strip()
+    if not device_id:
+        EVENTS.append(data)
+        return ("", 204)
 
     now = datetime.now(timezone.utc)
     LAST_SEEN_IP[ip].append(now)
@@ -641,7 +615,6 @@ def track():
     if any(dc in isp for dc in KNOWN_DATACENTERS):
         autoblock = True
         reason_ab = "isp_datacenter"
-
     # ------------------------------------------------------
     # 🔥 Bloqueo final
     # ------------------------------------------------------
@@ -652,10 +625,6 @@ def track():
         else:
             BLOCK_IPS.add(ip)
             data["autoblocked"] = {"by": "ip", "reason": reason_ab}
-
-        # Por ahora solo LOG (Google Ads en modo seguro)
-        dominio = (data.get("url") or "").lower()
-        logging.info(f"[SIMULADO] Bloqueo IP Ads {ip} en {dominio}")
 
         save_storage()
     else:
