@@ -134,12 +134,12 @@ LAST_SEEN_IP     = defaultdict(deque)
 
 SETTINGS = {
     "risk_autoblock": True,
-    "risk_threshold": 80,
+    "risk_threshold": 90,
     "repeat_window_seconds": 60,
     "repeat_window_min": 60,
     "repeat_required": 2,
-    "fast_dwell_ms": 600,
-    "fast_repeat_required": 3,
+    "fast_dwell_ms": 300,
+    "fast_repeat_required": 5,
     "min_good_dwell_ms": 2000,
     "good_dwell_window_minutes": 5
 }
