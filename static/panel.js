@@ -303,7 +303,7 @@ async function loadData() {
   const onlySuspicious = document.getElementById("onlySuspicious").checked;
   const search = (document.getElementById("search").value || "").toLowerCase();
 
-   let data = [];
+  let data = [];
   try {
     const res = await fetch("/api/events");
     const json = await res.json();
@@ -311,43 +311,31 @@ async function loadData() {
   } catch (e) {
     console.error("Error cargando eventos", e);
   }
+
+  // Filtrar sospechosos
   if (onlySuspicious) {
     data = data.filter(ev => (ev.risk?.score || 0) >= 40);
   }
 
-  if (search) {
-    data = data.filter(x =>
-      (x.ip || "").toLowerCase().includes(search) ||
-      (x.device_id || "").toLowerCase().includes(search) ||
-      (x.geo?.city || "").toLowerCase().includes(search) ||
-      (x.geo?.region || "").toLowerCase().includes(search) ||
-      (x.geo?.isp || "").toLowerCase().includes(search) ||
-      (x.type || "").toLowerCase().includes(search) ||
-      origen(x).toLowerCase().includes(search)
-    );
-  }
-
-  document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
-  document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
-}
-
-
-  // Filtrar filas ocultas solo en esta vista
+  // Filtrar filas ocultas solo en el panel
   const hidden = getHiddenSet();
   data = data.filter(ev => !hidden.has(eventKey(ev)));
 
+  // Buscador
   if (search) {
+    const s = search;
     data = data.filter(x =>
-      (x.ip || "").toLowerCase().includes(search) ||
-      (x.device_id || "").toLowerCase().includes(search) ||
-      (x.geo?.city || "").toLowerCase().includes(search) ||
-      (x.geo?.region || "").toLowerCase().includes(search) ||
-      (x.geo?.isp || "").toLowerCase().includes(search) ||
-      (x.type || "").toLowerCase().includes(search) ||
-      origen(x).toLowerCase().includes(search)
+      (x.ip || "").toLowerCase().includes(s) ||
+      (x.device_id || "").toLowerCase().includes(s) ||
+      (x.geo?.city || "").toLowerCase().includes(s) ||
+      (x.geo?.region || "").toLowerCase().includes(s) ||
+      (x.geo?.isp || "").toLowerCase().includes(s) ||
+      (x.type || "").toLowerCase().includes(s) ||
+      origen(x).toLowerCase().includes(s)
     );
   }
 
+  // Pintar tabla
   document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
   document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
 }
