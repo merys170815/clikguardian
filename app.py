@@ -564,13 +564,18 @@ def track():
     # ------------------------------------------------------
     # 🆕  Fingerprint fuerte
     # ------------------------------------------------------
-    raw_device = (data.get("device_id") or "").strip() or None
-    fingerprint = (data.get("fingerprint") or "").strip() or None
+    # ========================
+    # 🔥 DeviceID unificado (PRO)
+    # ========================
+    fp = (data.get("fingerprint") or "").strip()
+    raw = (data.get("device_id") or "").strip()
 
-    if not fingerprint:
-        fingerprint = build_fingerprint(data)
-
-    device_id = fingerprint or raw_device
+    if fp:
+        device_id = fp
+    elif raw:
+        device_id = raw
+    else:
+        device_id = build_fingerprint(data)
 
     now = datetime.now(timezone.utc)
     LAST_SEEN_IP[ip].append(now)
@@ -807,6 +812,19 @@ def asn_stats():
         a = (ev.get("geo") or {}).get("asn") or "?"
         counter[a] += 1
     return jsonify(counter)
+
+@app.get("/api/amiblocked")
+def api_am_i_blocked():
+    device_id = request.args.get("device_id", "").strip()
+    ip = get_client_ip()
+
+    blocked_device = device_id in BLOCK_DEVICES if device_id else False
+    blocked_ip     = ip in BLOCK_IPS
+
+    return jsonify({
+        "blocked": blocked_device or blocked_ip,
+        "blocked_by": "device" if blocked_device else ("ip" if blocked_ip else None)
+    })
 
 @app.get("/api/stats/devices")
 def device_stats():
