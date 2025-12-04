@@ -119,11 +119,19 @@ app = Flask(__name__)
 
 # ✅ CORS — versión FINAL (incluye /track, /guard, /api/events)
 CORS(app, resources={
-    r"/track": {"origins": "*"},
-    r"/guard": {"origins": "*"},
-    r"/api/*": {"origins": "*"},        # ← IMPORTANTE para /api/events
-    r"/events": {"origins": "*"},       # ← por si tu endpoint es /events sin prefijo
-    r"/api/events": {"origins": "*"}    # ← este es el exacto que usa el panel
+    r"/track": {"origins": [
+        "https://medigoencas.com",
+        "https://www.medigoencas.com",
+        "https://sumedicoencasa.com",
+        "https://www.sumedicoencasa.com",
+        "https://asisvitalips.com",
+        "https://www.asisvitalips.com",
+        "https://clikguardian.onrender.com",
+        "http://localhost",
+        "http://127.0.0.1"
+    ]},
+    r"/api/*": {"origins": "*"},
+    r"/guard": {"origins": "*"}
 })
 
 
@@ -509,7 +517,7 @@ def push_ip_to_google_ads(ip: str, domain: str = ""):
 # ======================================================
 # ✅ TRACK — versión PRO con bloqueo por RANGO + ASN + ISP
 # ======================================================
-@app.route("/track", methods=["POST", "OPTIONS"])
+@app.route("/track", methods=["POST","OPTIONS"])
 def track():
     if request.method == "OPTIONS":
         return ("", 204)
@@ -517,6 +525,41 @@ def track():
     data = request.get_json(force=True, silent=True) or {}
 
     ip = get_client_ip()
+    device_id = (data.get("device_id") or "").strip() or None
+
+    now = datetime.now(timezone.utc)
+    LAST_SEEN_IP[ip].append(now)
+    if device_id:
+        LAST_SEEN_DEVICE[device_id].append(now)
+
+    # Datos base
+    data["ip"] = ip
+    data["device_id"] = device_id
+    data["ts"] = now_iso()
+    data["geo"] = geo_lookup(ip)
+    data["risk"] = compute_risk(data)
+
+    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+    # Guardar dwell previo para patrones avanzados
+    last_dwell_dev = LAST_DWELL_DEVICE.get(device_id) if device_id else None
+    last_dwell_ip = LAST_DWELL_IP.get(ip)
+
+    data["last_dwell_device"] = last_dwell_dev
+    data["last_dwell_ip"] = last_dwell_ip
+
+    # Repeticiones
+    repeats = touches_in_window_device(device_id, SETTINGS["repeat_window_seconds"]) \
+        if device_id else touches_in_window_ip(ip, SETTINGS["repeat_window_seconds"])
+
+    dwell = data.get("dwell_ms") or 0
+    evt_type = (data.get("type") or "").lower()
+
+    # WHITELIST
+    if device_id in WHITELIST_DEVICES or ip in WHITELIST_IPS:
+        data["blocked"] = False
+        EVENTS.append(data)
+        return ("", 204)
+
 
     # ------------------------------------------------------
     # 🆕  Fingerprint fuerte

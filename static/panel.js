@@ -47,7 +47,6 @@ async function buildFingerprint() {
 
   return await sha256(raw);
 }
-
 // ==========================
 // Helpers (riesgo, eventos, origen)
 // ==========================
@@ -75,6 +74,7 @@ function explain(event, dwell) {
   }
   return "Actividad detectada";
 }
+
 
 function origen(r) {
   const ref = (r.ref || "").toLowerCase();
@@ -120,7 +120,6 @@ async function unblockDevice(device_id) {
     alert("Error al desbloquear el dispositivo");
   }
 }
-
 async function blockIp(ip) {
   try {
     if (!ip) { alert("Sin IP"); return; }
@@ -135,6 +134,7 @@ async function blockIp(ip) {
     alert("Error al bloquear la IP");
   }
 }
+
 
 async function unblockIp(ip) {
   try {
@@ -204,7 +204,7 @@ function hideRow(ts, ip, device_id) {
 // ==========================
 // Render fila (CON CAMPO SITIO Y X ROJA)
 // ==========================
-function renderRow(r, index) {
+function renderRow(r) {
   const dwell = r.dwell_ms ?? 0;
   const isWA = r.type === "whatsapp_click";
 
@@ -228,7 +228,7 @@ function renderRow(r, index) {
     : `unblockIp('${r.ip}')`;
 
   return `
-    <tr id="row_${index}" class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
+    <tr class="${isWA ? 'row-whatsapp' : ''} ${blockedNow ? 'row-blocked' : ''}">
       <td>${r.ts || "-"}</td>
       <td>${r.ip || "-"}</td>
 
@@ -241,11 +241,13 @@ function renderRow(r, index) {
 
       <td>${r.site || "-"}</td>
 
+      <td>${translateEvent(r.type)}</td>
+
       <td>
         ${translateEvent(r.type)}
         <br>
         <button class="meta-btn" onclick="showMeta(${JSON.stringify(r).replace(/"/g, '&quot;')})">
-          Ver meta
+        Ver meta
         </button>
       </td>
 
@@ -266,12 +268,12 @@ function renderRow(r, index) {
         }
       </td>
 
-      <td>
+     <td>
         <button class="map-btn" onclick="openMap('${r.geo?.lat}','${r.geo?.lon}','${r.geo?.city}')">
           Ver mapa
         </button>
 
-        ${
+       ${
           blockedNow
             ? `<button style="margin-left:6px" onclick="${unblockCall}">
                  Desbloquear
@@ -301,14 +303,33 @@ async function loadData() {
   const onlySuspicious = document.getElementById("onlySuspicious").checked;
   const search = (document.getElementById("search").value || "").toLowerCase();
 
-  let data = [];
+   let data = [];
   try {
-    const res = await fetch("https://api.medigoencas.com/api/events");
+    const res = await fetch("/api/events");
     const json = await res.json();
     data = json.events || [];
   } catch (e) {
     console.error("Error cargando eventos", e);
   }
+  if (onlySuspicious) {
+    data = data.filter(ev => (ev.risk?.score || 0) >= 40);
+  }
+
+  if (search) {
+    data = data.filter(x =>
+      (x.ip || "").toLowerCase().includes(search) ||
+      (x.device_id || "").toLowerCase().includes(search) ||
+      (x.geo?.city || "").toLowerCase().includes(search) ||
+      (x.geo?.region || "").toLowerCase().includes(search) ||
+      (x.geo?.isp || "").toLowerCase().includes(search) ||
+      (x.type || "").toLowerCase().includes(search) ||
+      origen(x).toLowerCase().includes(search)
+    );
+  }
+
+  document.getElementById("tbody").innerHTML = data.map(renderRow).join("");
+  document.getElementById("kpiSummary").innerText = `Total: ${data.length}`;
+}
 
 
   // Filtrar filas ocultas solo en esta vista
@@ -335,7 +356,6 @@ function removeRow(index) {
   const row = document.getElementById("row_" + index);
   if (row) row.remove();
 }
-
 function showMeta(r) {
   const box = document.getElementById("metaBox");
   box.innerHTML = renderClientMeta(r);
@@ -347,6 +367,7 @@ document.addEventListener("click", (e) => {
     document.getElementById("metaBox").style.display = "none";
   }
 });
+
 
 // ==========================
 // Map modal
@@ -364,7 +385,6 @@ function openMap(lat, lon, city) {
   L.marker([lat, lon]).addTo(map);
   document.getElementById("mapTitle").innerText = "Ubicación aproximada: " + city;
 }
-
 document.getElementById("closeMap").onclick = () => document.getElementById("mapModal").style.display = "none";
 document.getElementById("zoomIn").onclick = () => map && map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
