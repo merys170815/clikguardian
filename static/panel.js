@@ -27,68 +27,96 @@ window.addEventListener("beforeunload", () => {
   });
 });
 
+// ==========================
+// IDENTIFICADOR REAL ÚNICO
+// ==========================
 
 let DEVICE_ID = null;
+
+// *** SALT secreto — cámbialo para ti ***
+const CG_SALT = "MEDIGOENCASA-2025";
+
 async function initDevice() {
+  // 1️⃣ Si ya existe, úsalo
   const stored = localStorage.getItem("cg_device_id");
   if (stored) {
     DEVICE_ID = stored;
     return;
   }
 
-  DEVICE_ID = await buildFingerprint();
-  localStorage.setItem("cg_device_id", DEVICE_ID);
-}
+  // 2️⃣ Obtener fingerprint base
+  let finger = await getFingerprintBase();
 
-
-// ======================================================
-// 🔥 Fingerprint REAL PRO — ÚNICO incluso en celulares iguales
-// ======================================================
-
-async function buildFingerprint() {
-  // 1. Persistente por navegador
-  let persistentId = localStorage.getItem("cg_persistent_id");
-  if (!persistentId) {
-    persistentId = crypto.randomUUID();
-    localStorage.setItem("cg_persistent_id", persistentId);
+  // 3️⃣ timestamp de instalación
+  let installTs = localStorage.getItem("cg_install_ts");
+  if (!installTs) {
+    installTs = Date.now().toString();
+    localStorage.setItem("cg_install_ts", installTs);
   }
 
-  // 2. Canvas fingerprint
+  // 4️⃣ mezcla final
+  const raw = finger + "|" + installTs + "|" + CG_SALT;
+
+  // 5️⃣ hash
+  const finalID = "perm-" + btoa(raw).substring(0,38);
+
+  // 6️⃣ guardar
+  localStorage.setItem("cg_device_id", finalID);
+  DEVICE_ID = finalID;
+}
+
+// *** Fingerprint base — NO único pero estable ***
+async function getFingerprintBase(){
+  // persistent para que no cambie
+  let pid = localStorage.getItem("cg_persistent_id");
+  if (!pid) {
+    pid = crypto.randomUUID();
+    localStorage.setItem("cg_persistent_id", pid);
+  }
+
+  // canvas
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   ctx.textBaseline = "top";
   ctx.font = "16px Arial";
   ctx.fillStyle = "#f60";
-  ctx.fillText("ClickGuardian-Pro-FP", 2, 2);
+  ctx.fillText("MGC-FP", 2, 2);
   const canvasFP = canvas.toDataURL();
 
-  // 3. Audio fingerprint
-  const audioCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
-  const oscillator = audioCtx.createOscillator();
-  oscillator.type = "triangle";
-  oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
-
-  const compressor = audioCtx.createDynamicsCompressor();
-  oscillator.connect(compressor);
-  compressor.connect(audioCtx.destination);
-  oscillator.start(0);
-
-  const audioBuffer = await audioCtx.startRendering();
-  const audioData = audioBuffer.getChannelData(0).slice(0, 50).join("");
-
-  // 4. Sistema básico
+  // básico
   const basicRaw = [
     navigator.userAgent,
     navigator.language,
     Intl.DateTimeFormat().resolvedOptions().timeZone,
     navigator.platform,
-    `${window.screen.width}x${window.screen.height}`
+    `${screen.width}x${screen.height}`
   ].join("|");
 
-  // 5. Mezcla final
-  const raw = persistentId + "|" + canvasFP + "|" + audioData + "|" + basicRaw;
+  return pid + "|" + canvasFP.substring(0,40) + "|" + basicRaw;
+}
 
-  return await sha256(raw);
+// ==========================
+// SEND EVENT
+// ==========================
+async function sendEvent(data) {
+  // asegurar ID
+  if (!DEVICE_ID) {
+    const stored = localStorage.getItem("cg_device_id");
+    if (stored) {
+      DEVICE_ID = stored;
+    } else {
+      await initDevice();
+    }
+  }
+
+  data.device_id = DEVICE_ID;
+
+  fetch("/track", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+    keepalive:true
+  });
 }
 // ==========================
 // Helpers (riesgo, eventos, origen)
@@ -419,29 +447,6 @@ function openMap(lat, lon, city) {
 document.getElementById("closeMap").onclick = () => document.getElementById("mapModal").style.display = "none";
 document.getElementById("zoomIn").onclick = () => map && map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
-
-
-
-async function sendEvent(data) {
-  // Asegurar que ya tenemos DEVICE_ID
-  if (!DEVICE_ID) {
-    const stored = localStorage.getItem("cg_device_id");
-    if (stored) {
-      DEVICE_ID = stored;
-    } else {
-      DEVICE_ID = await buildFingerprint();
-      localStorage.setItem("cg_device_id", DEVICE_ID);
-    }
-  }
-
-  data.device_id = DEVICE_ID;
-
-  await fetch("/track", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
-}
 
 // ==========================
 // Auto-reload
