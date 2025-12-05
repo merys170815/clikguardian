@@ -38,7 +38,7 @@ const CG_SALT = "MEDIGOENCASA-2025";
 
 async function initDevice() {
   // 1️⃣ Si ya existe, úsalo
-  const stored = localStorage.getItem("cg_device_id");
+  const stored = localStorage.getItem("cg_device_id_v2");
   if (stored) {
     DEVICE_ID = stored;
     return;
@@ -48,10 +48,10 @@ async function initDevice() {
   let finger = await getFingerprintBase();
 
   // 3️⃣ timestamp de instalación
-  let installTs = localStorage.getItem("cg_install_ts");
+  let installTs = localStorage.getItem("cg_install_ts_v2");
   if (!installTs) {
     installTs = Date.now().toString();
-    localStorage.setItem("cg_install_ts", installTs);
+    localStorage.setItem("cg_install_ts_v2", installTs);
   }
 
   // 4️⃣ mezcla final
@@ -61,17 +61,17 @@ async function initDevice() {
   const finalID = "perm-" + btoa(raw).substring(0,38);
 
   // 6️⃣ guardar
-  localStorage.setItem("cg_device_id", finalID);
+  localStorage.setItem("cg_device_id_v2", finalID);
   DEVICE_ID = finalID;
 }
 
 // *** Fingerprint base — NO único pero estable ***
 async function getFingerprintBase(){
   // persistent para que no cambie
-  let pid = localStorage.getItem("cg_persistent_id");
+  let pid = localStorage.getItem("cg_persistent_id_v2");
   if (!pid) {
     pid = crypto.randomUUID();
-    localStorage.setItem("cg_persistent_id", pid);
+    localStorage.setItem("cg_persistent_id_v2", pid);
   }
 
   // canvas
@@ -101,7 +101,7 @@ async function getFingerprintBase(){
 async function sendEvent(data) {
   // asegurar ID
   if (!DEVICE_ID) {
-    const stored = localStorage.getItem("cg_device_id");
+    const stored = localStorage.getItem("cg_device_id_v2");
     if (stored) {
       DEVICE_ID = stored;
     } else {
