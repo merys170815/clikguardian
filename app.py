@@ -14,6 +14,7 @@ from google.ads.googleads.errors import GoogleAdsException
 import json, os
 
 
+
 import hashlib
 
 
@@ -96,21 +97,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 app = Flask(__name__)
 
 # ✅ CORS — versión FINAL (incluye /track, /guard, /api/events)
-CORS(app, resources={
-    r"/track": {"origins": [
-        "https://medigoencas.com",
-        "https://www.medigoencas.com",
-        "https://sumedicoencasa.com",
-        "https://www.sumedicoencasa.com",
-        "https://asisvitalips.com",
-        "https://www.asisvitalips.com",
-        "https://clikguardian.onrender.com",
-        "http://localhost",
-        "http://127.0.0.1"
-    ]},
-    r"/api/*": {"origins": "*"},
-    r"/guard": {"origins": "*"}
-})
+
+
+allowed_origins = [
+    "https://medigoencas.com",
+    "https://www.medigoencas.com",
+    "https://sumedicoencasa.com",
+    "https://www.sumedicoencasa.com",
+    "https://asisvitalips.com",
+    "https://www.asisvitalips.com",
+    "https://clikguardian.onrender.com",
+    "http://localhost",
+    "http://127.0.0.1"
+]
+CORS(app,
+     resources={r"/*": {"origins": allowed_origins}},
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "OPTIONS"])
 
 
 # ✅ Estado global
