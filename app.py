@@ -694,24 +694,37 @@ def add_block_ip():
     return jsonify({"ok": True, "blocked": ip})
 
 
-@app.delete("/api/blockdevices")
+@app.route("/del_block_device", methods=["POST"])
 def del_block_device():
-    data = request.get_json(force=True) or {}
-    d = (data.get("device_id") or "").strip()
-    if d in BLOCK_DEVICES:
-        BLOCK_DEVICES.remove(d)
-        save_storage()
-        return jsonify({"ok": True, "unblocked": d})
+    try:
+        data = request.get_json(force=True)
+        device_id = data.get("device_id")
+
+        if device_id and device_id in LAST_DWELL_DEVICE:
+            LAST_DWELL_DEVICE.pop(device_id, None)
+            save_storage()
+
+        return jsonify({"status": "ok", "device_id": device_id}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
-@app.delete("/api/blockips")
+@app.route("/del_block_ip", methods=["POST"])
 def del_block_ip():
-    data = request.get_json(force=True) or {}
-    ip = (data.get("ip") or "").strip()
-    if ip in BLOCK_IPS:
-        BLOCK_IPS.remove(ip)
-        save_storage()
-        return jsonify({"ok": True, "unblocked": ip})
+    try:
+        data = request.get_json(force=True)
+        ip = data.get("ip")
+
+        if ip and ip in LAST_DWELL_IP:
+            LAST_DWELL_IP.pop(ip, None)
+            save_storage()
+
+        return jsonify({"status": "ok", "ip": ip}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.delete("/api/whitelist/devices")
 def delete_whitelist_device():

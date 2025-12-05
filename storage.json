@@ -1,13 +1,13 @@
 {
   "block_devices": [],
   "block_ips": [],
+  "block_ranges": [],
   "whitelist_devices": [],
   "whitelist_ips": [],
   "settings": {
     "risk_autoblock": true,
     "risk_threshold": 80,
     "repeat_window_seconds": 60,
-    "repeat_window_min": 60,
     "repeat_required": 2,
     "fast_dwell_ms": 600,
     "fast_repeat_required": 3,
