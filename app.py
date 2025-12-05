@@ -133,14 +133,15 @@ LAST_DWELL_IP     = {}
 
 SETTINGS = {
     "risk_autoblock": True,
-    "risk_threshold": 75,
-    "repeat_window_seconds": 45,
-    "repeat_required": 2,
-    "fast_dwell_ms": 450,
-    "fast_repeat_required": 3,
-    "min_good_dwell_ms": 2000,
-    "good_dwell_window_minutes": 5
+    "risk_threshold": 85,         # antes tenías 75
+    "repeat_window_seconds": 60,  # antes 45
+    "repeat_required": 4,         # antes 2
+    "fast_dwell_ms": 350,         # antes 450 (ok)
+    "fast_repeat_required": 6,    # antes 3 (subo a 6)
+    "min_good_dwell_ms": 2200,    # era 2000 (normal)
+    "good_dwell_window_minutes": 8 # era 5 (subo)
 }
+
 
 
 

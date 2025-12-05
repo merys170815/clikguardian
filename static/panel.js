@@ -1,3 +1,46 @@
+// ==========================
+// Evento de entrada (LAND)
+// ==========================
+(async () => {
+  await initDevice();
+  sendEvent({
+    type: "land",
+    ts: Date.now(),
+    url: location.href,
+    ref: document.referrer,
+    ua: navigator.userAgent,
+    lang: navigator.language,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    platform: navigator.platform,
+    screen: `${window.screen.width}x${window.screen.height}`
+  });
+})();
+
+
+// ==========================
+// Evento de salida (LEAVE)
+// ==========================
+window.addEventListener("beforeunload", () => {
+  sendEvent({
+    type: "leave",
+    ts: Date.now()
+  });
+});
+
+
+let DEVICE_ID = null;
+async function initDevice() {
+  const stored = localStorage.getItem("cg_device_id");
+  if (stored) {
+    DEVICE_ID = stored;
+    return;
+  }
+
+  DEVICE_ID = await buildFingerprint();
+  localStorage.setItem("cg_device_id", DEVICE_ID);
+}
+
+
 // ======================================================
 // 🔥 Fingerprint REAL PRO — ÚNICO incluso en celulares iguales
 // ======================================================
@@ -376,6 +419,29 @@ function openMap(lat, lon, city) {
 document.getElementById("closeMap").onclick = () => document.getElementById("mapModal").style.display = "none";
 document.getElementById("zoomIn").onclick = () => map && map.zoomIn();
 document.getElementById("zoomOut").onclick = () => map && map.zoomOut();
+
+
+
+async function sendEvent(data) {
+  // Asegurar que ya tenemos DEVICE_ID
+  if (!DEVICE_ID) {
+    const stored = localStorage.getItem("cg_device_id");
+    if (stored) {
+      DEVICE_ID = stored;
+    } else {
+      DEVICE_ID = await buildFingerprint();
+      localStorage.setItem("cg_device_id", DEVICE_ID);
+    }
+  }
+
+  data.device_id = DEVICE_ID;
+
+  await fetch("/track", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+}
 
 // ==========================
 // Auto-reload
