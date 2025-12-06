@@ -139,14 +139,12 @@ SETTINGS = {
     "risk_autoblock": True,
     "risk_threshold": 85,         # antes tenías 75
     "repeat_window_seconds": 60,  # antes 45
-    "repeat_required": 4,         # antes 2
+    "repeat_required": 5,         # antes 2
     "fast_dwell_ms": 350,         # antes 450 (ok)
     "fast_repeat_required": 6,    # antes 3 (subo a 6)
     "min_good_dwell_ms": 2200,    # era 2000 (normal)
     "good_dwell_window_minutes": 8 # era 5 (subo)
 }
-
-
 
 
 BOT_UA_PAT = re.compile(
@@ -682,6 +680,27 @@ def add_block_device():
     save_storage()
     return jsonify({"ok": True, "blocked": d})
 
+@app.delete("/api/blockdevices")
+def remove_block_device():
+    data = request.get_json(force=True) or {}
+    device_id = (data.get("device_id") or "").strip()
+
+    if not device_id:
+        return jsonify({"ok": False, "error": "device_id requerido"}), 400
+
+    # 1) Quitar del set de bloqueados
+    if device_id in BLOCK_DEVICES:
+        BLOCK_DEVICES.remove(device_id)
+
+    # 2) Quitar dwell
+        LAST_DWELL_DEVICE.pop(device_id, None)
+
+    # 3) Guardar en disco
+        save_storage()
+
+        return jsonify({"ok": True, "removed": device_id})
+
+    return jsonify({"ok": False, "error": "device_id no encontrado"}), 404
 
 @app.post("/api/blockips")
 def add_block_ip():
@@ -692,6 +711,22 @@ def add_block_ip():
     BLOCK_IPS.add(ip)
     save_storage()
     return jsonify({"ok": True, "blocked": ip})
+
+@app.delete("/api/blockips")
+def remove_block_ip():
+    data = request.get_json(force=True) or {}
+    ip = (data.get("ip") or "").strip()
+
+    if not ip:
+        return jsonify({"ok": False, "error": "ip requerida"}), 400
+
+    if ip in BLOCK_IPS:
+        BLOCK_IPS.remove(ip)
+        LAST_DWELL_IP.pop(ip, None)
+        save_storage()
+        return jsonify({"ok": True, "removed": ip})
+
+    return jsonify({"ok": False, "error": "ip no encontrada"}), 404
 
 
 @app.route("/del_block_device", methods=["POST"])
